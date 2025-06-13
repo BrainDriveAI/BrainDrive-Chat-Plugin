@@ -671,6 +671,76 @@ class BrainDriveChatLifecycleManager(BaseLifecycleManager):
             logger.error(f"BrainDriveChat: Error deleting database records: {e}")
             await db.rollback()
             return {'success': False, 'error': str(e)}
+    
+    # Compatibility methods for old interface
+    async def install_plugin(self, user_id: str, db: AsyncSession) -> Dict[str, Any]:
+        """Install BrainDriveChat plugin for specific user (compatibility method)"""
+        try:
+            logger.info(f"BrainDriveChat: Starting installation for user {user_id}")
+            
+            # Check if plugin is already installed for this user
+            existing_check = await self._check_existing_plugin(user_id, db)
+            if existing_check['exists']:
+                logger.warning(f"BrainDriveChat: Plugin already installed for user {user_id}")
+                return {
+                    'success': False,
+                    'error': 'Plugin already installed for user',
+                    'plugin_id': existing_check['plugin_id']
+                }
+            
+            shared_path = self.shared_path
+            shared_path.mkdir(parents=True, exist_ok=True)
+            logger.info(f"BrainDriveChat: Created shared directory: {shared_path}")
+
+            # Copy plugin files to the shared directory first
+            copy_result = await self._copy_plugin_files_impl(user_id, shared_path)
+            if not copy_result['success']:
+                logger.error(f"BrainDriveChat: File copying failed: {copy_result.get('error')}")
+                return copy_result
+
+            logger.info(f"BrainDriveChat: Files copied successfully, proceeding with database installation")
+            
+            # Ensure we're in a transaction
+            try:
+                result = await self.install_for_user(user_id, db, shared_path)
+                
+                if result.get('success'):
+                    # Verify the installation was successful
+                    verify_check = await self._check_existing_plugin(user_id, db)
+                    if not verify_check['exists']:
+                        logger.error(f"BrainDriveChat: Installation appeared successful but verification failed")
+                        return {'success': False, 'error': 'Installation verification failed'}
+                    
+                    logger.info(f"BrainDriveChat: Installation verified successfully for user {user_id}")
+                    result.update({
+                        'plugin_slug': self.plugin_data['plugin_slug'],
+                        'plugin_name': self.plugin_data['name']
+                    })
+                else:
+                    logger.error(f"BrainDriveChat: Database installation failed: {result.get('error')}")
+                
+                return result
+                
+            except Exception as db_error:
+                logger.error(f"BrainDriveChat: Database operation failed: {db_error}")
+                # Try to rollback if possible
+                try:
+                    await db.rollback()
+                except:
+                    pass
+                return {'success': False, 'error': f'Database operation failed: {str(db_error)}'}
+                
+        except Exception as e:
+            logger.error(f"BrainDriveChat: Installation failed for user {user_id}: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    async def delete_plugin(self, user_id: str, db: AsyncSession) -> Dict[str, Any]:
+        """Delete BrainDriveChat plugin for user (compatibility method)"""
+        return await self.uninstall_for_user(user_id, db)
+    
+    async def get_plugin_status(self, user_id: str, db: AsyncSession) -> Dict[str, Any]:
+        """Get current status of BrainDriveChat plugin installation (compatibility method)"""
+        return await self._check_existing_plugin(user_id, db)
 
 
 # Compatibility methods for remote installer
