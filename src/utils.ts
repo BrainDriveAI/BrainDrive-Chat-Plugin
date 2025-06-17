@@ -18,9 +18,27 @@ export function extractTextFromData(data: any): string {
   
   // Handle object responses with various text fields
   if (typeof data === 'object') {
-    // Common text fields in AI responses
+    // Priority order for text extraction - 'text' field first as it's what our API returns
+    if (data.text && typeof data.text === 'string') {
+      return data.text;
+    }
+    
+    // Handle choices array format (OpenAI-style)
+    if (data.choices && Array.isArray(data.choices) && data.choices.length > 0) {
+      const choice = data.choices[0];
+      if (choice.delta && choice.delta.content) {
+        return choice.delta.content;
+      }
+      if (choice.message && choice.message.content) {
+        return choice.message.content;
+      }
+      if (choice.text) {
+        return choice.text;
+      }
+    }
+    
+    // Handle other common text fields
     const textFields = [
-      'text',
       'content',
       'message',
       'response',
@@ -32,20 +50,6 @@ export function extractTextFromData(data: any): string {
     for (const field of textFields) {
       if (data[field] && typeof data[field] === 'string') {
         return data[field];
-      }
-    }
-    
-    // Handle nested content structures
-    if (data.choices && Array.isArray(data.choices) && data.choices.length > 0) {
-      const choice = data.choices[0];
-      if (choice.message && choice.message.content) {
-        return choice.message.content;
-      }
-      if (choice.text) {
-        return choice.text;
-      }
-      if (choice.delta && choice.delta.content) {
-        return choice.delta.content;
       }
     }
     

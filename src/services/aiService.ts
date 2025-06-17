@@ -15,7 +15,7 @@ export class AIService {
    */
   private async initializeUserId() {
     try {
-      if (this.services.api) {
+      if (this.services?.api) {
         const response = await this.services.api.get('/api/v1/auth/me');
         if (response && response.id) {
           this.currentUserId = response.id;
@@ -37,7 +37,7 @@ export class AIService {
     onChunk: (chunk: string) => void,
     onConversationId: (id: string) => void
   ): Promise<boolean> {
-    if (!this.services.api) {
+    if (!this.services?.api) {
       throw new Error('API service not available');
     }
 
@@ -46,15 +46,14 @@ export class AIService {
       { role: "user", content: prompt }
     ];
 
-    // Define endpoints
-    const productionEndpoint = '/api/v1/ai/providers/chat';
-    const testEndpoint = '/api/v1/ai/providers/test/ollama/chat';
+    // Use only the production endpoint
+    const endpoint = '/api/v1/ai/providers/chat';
 
-    // Create production request params
-    const productionRequestParams = {
+    // Create request params for production endpoint
+    const requestParams = {
       provider: selectedModel.provider || 'ollama',
       settings_id: selectedModel.providerId || 'ollama_servers_settings',
-      server_id: selectedModel.serverId || 'server_1538843993_8e87ea7654',
+      server_id: selectedModel.serverId,
       model: selectedModel.name,
       messages: messages.map(msg => ({
         role: msg.role || 'user',
@@ -69,30 +68,29 @@ export class AIService {
       conversation_id: conversationId
     };
 
-    // Create test request params as fallback
-    const testRequestParams = {
-      messages: messages,
-      model: selectedModel.name,
-      stream: useStreaming,
-      temperature: 0.7,
-      max_tokens: 2048,
-      server_url: "http://localhost:11434"
-    };
-
     try {
-      // Define a function to handle streaming
-      const handleStreaming = async (endpointUrl: string, params: any): Promise<boolean> => {
-        try {
-          if (!this.services.api?.postStreaming) {
-            throw new Error('postStreaming method not available');
-          }
+      let success = false;
 
+      if (useStreaming && typeof this.services?.api?.postStreaming === 'function') {
+        // Handle streaming
+        try {
           await this.services.api.postStreaming(
-            endpointUrl,
-            params,
+            endpoint,
+            requestParams,
             (chunk: string) => {
               try {
-                const data = JSON.parse(chunk);
+                // Handle Server-Sent Events format - remove 'data: ' prefix if present
+                let jsonString = chunk;
+                if (chunk.startsWith('data: ')) {
+                  jsonString = chunk.substring(6); // Remove 'data: ' prefix
+                }
+                
+                // Skip empty chunks or [DONE] markers
+                if (!jsonString.trim() || jsonString.trim() === '[DONE]') {
+                  return;
+                }
+
+                const data = JSON.parse(jsonString);
 
                 // Store the conversation_id if it's in the response
                 if (data.conversation_id && !conversationId) {
@@ -111,23 +109,15 @@ export class AIService {
               timeout: 120000
             }
           );
-
-          return true;
+          success = true;
         } catch (error) {
           console.error('Streaming error:', error);
-          return false;
+          throw error;
         }
-      };
-
-      // Define a function to handle non-streaming
-      const handleNonStreaming = async (endpointUrl: string, params: any): Promise<boolean> => {
+      } else {
+        // Handle non-streaming
         try {
-          if (!this.services.api?.post) {
-            throw new Error('post method not available');
-          }
-
-          const response = await this.services.api.post(endpointUrl, params, { timeout: 60000 });
-
+          const response = await this.services.api.post(endpoint, requestParams, { timeout: 60000 });
           const responseData = response.data || response;
 
           // Store the conversation_id if it's in the response
@@ -135,50 +125,23 @@ export class AIService {
             onConversationId(responseData.conversation_id);
           }
 
-          let responseText = extractTextFromData(responseData);
-
+          const responseText = extractTextFromData(responseData);
           if (responseText) {
             onChunk(responseText);
-            return true;
+            success = true;
           } else {
-            return false;
+            throw new Error('No response text received');
           }
         } catch (error) {
           console.error('Non-streaming error:', error);
-          return false;
+          throw error;
         }
-      };
-
-      // Try production endpoint first
-      let success = false;
-
-      if (useStreaming && typeof this.services.api.postStreaming === 'function') {
-        success = await handleStreaming(productionEndpoint, productionRequestParams);
-
-        // If production endpoint fails, try test endpoint
-        if (!success) {
-          onChunk("Production endpoint failed, trying test endpoint...\n\n");
-          success = await handleStreaming(testEndpoint, testRequestParams);
-        }
-      } else {
-        success = await handleNonStreaming(productionEndpoint, productionRequestParams);
-
-        // If production endpoint fails, try test endpoint
-        if (!success) {
-          onChunk("Production endpoint failed, trying test endpoint...\n\n");
-          success = await handleNonStreaming(testEndpoint, testRequestParams);
-        }
-      }
-
-      // If both endpoints failed, show error message
-      if (!success) {
-        onChunk("Sorry, I couldn't generate a response. Both production and test endpoints failed.");
       }
 
       return success;
     } catch (error) {
       console.error('Error in sendPrompt:', error);
-      onChunk("Sorry, I couldn't generate a response. Please try again.");
+      onChunk(`Error: ${error instanceof Error ? error.message : 'Unknown error occurred'}`);
       return false;
     }
   }

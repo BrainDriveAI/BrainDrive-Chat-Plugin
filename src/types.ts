@@ -40,13 +40,21 @@ export interface ConversationDropdownOption {
   };
 }
 
+// API Response interface
+export interface ApiResponse {
+  data?: any;
+  status?: number;
+  id?: string;
+  [key: string]: any;
+}
+
 // Service interfaces
 export interface ApiService {
-  get: (url: string, options?: any) => Promise<any>;
-  post: (url: string, data: any, options?: any) => Promise<any>;
-  put: (url: string, data: any, options?: any) => Promise<any>;
-  delete: (url: string, options?: any) => Promise<any>;
-  postStreaming?: (url: string, data: any, onChunk: (chunk: string) => void, options?: any) => Promise<void>;
+  get: (url: string, options?: any) => Promise<ApiResponse>;
+  post: (url: string, data: any, options?: any) => Promise<ApiResponse>;
+  put: (url: string, data: any, options?: any) => Promise<ApiResponse>;
+  delete: (url: string, options?: any) => Promise<ApiResponse>;
+  postStreaming?: (url: string, data: any, onChunk: (chunk: string) => void, options?: any) => Promise<ApiResponse>;
 }
 
 export interface EventService {
@@ -66,6 +74,7 @@ export interface SettingsService {
   set: (key: string, value: any) => Promise<void>;
   getSetting?: (id: string) => Promise<any>;
   setSetting?: (id: string, value: any) => Promise<any>;
+  getSettingDefinitions?: () => Promise<any>;
 }
 
 export interface Services {
@@ -78,7 +87,7 @@ export interface Services {
 // Component props
 export interface BrainDriveChatProps {
   moduleId?: string;
-  services?: Services;
+  services: Services;
   initialGreeting?: string;
   defaultStreamingMode?: boolean;
   promptQuestion?: string;

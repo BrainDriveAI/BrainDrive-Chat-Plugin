@@ -32,7 +32,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   private chatHistoryRef = React.createRef<HTMLDivElement>();
   private inputRef = React.createRef<HTMLTextAreaElement>();
   private themeChangeListener: ((theme: string) => void) | null = null;
-  private readonly STREAMING_SETTING_KEY = 'braindrive_chat_streaming_enabled';
+  private readonly STREAMING_SETTING_KEY = 'ai_prompt_chat_streaming_enabled';
   private initialGreetingAdded = false;
   private debouncedScrollToBottom: () => void;
   private aiService: AIService | null = null;
@@ -79,9 +79,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     this.debouncedScrollToBottom = debounce(this.scrollToBottom.bind(this), 100);
     
     // Initialize AI service
-    if (props.services) {
-      this.aiService = new AIService(props.services);
-    }
+    this.aiService = new AIService(props.services);
   }
 
   componentDidMount() {
@@ -130,7 +128,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   /**
    * Load initial data (models and conversations)
    */
-  async loadInitialData() {
+  loadInitialData = async () => {
     await Promise.all([
       this.loadProviderSettings(),
       this.fetchConversations()
@@ -140,7 +138,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   /**
    * Get saved streaming mode from settings
    */
-  getSavedStreamingMode(): boolean | null {
+  getSavedStreamingMode = (): boolean | null => {
     try {
       if (this.props.services?.settings) {
         const savedValue = this.props.services.settings.get(this.STREAMING_SETTING_KEY);
@@ -157,7 +155,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   /**
    * Save streaming mode to settings
    */
-  async saveStreamingMode(enabled: boolean): Promise<void> {
+  saveStreamingMode = async (enabled: boolean): Promise<void> => {
     try {
       if (this.props.services?.settings) {
         await this.props.services.settings.set(this.STREAMING_SETTING_KEY, enabled);
@@ -187,7 +185,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   /**
    * Initialize the theme service to listen for theme changes
    */
-  initializeThemeService() {
+  initializeThemeService = () => {
     if (this.props.services?.theme) {
       try {
         // Get the current theme
@@ -329,7 +327,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   /**
    * Fetch conversations from the API
    */
-  async fetchConversations() {
+  fetchConversations = async () => {
     if (!this.props.services?.api) {
       this.setState({
         isLoadingHistory: false,
@@ -545,9 +543,90 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   };
 
   /**
+   * Handle renaming a conversation
+   */
+  handleRenameConversation = async (conversationId: string, newTitle: string) => {
+    if (!this.props.services?.api) {
+      throw new Error('API service not available');
+    }
+
+    try {
+      await this.props.services.api.put(
+        `/api/v1/conversations/${conversationId}`,
+        { title: newTitle }
+      );
+
+      // Update the conversation in state
+      this.setState(prevState => {
+        const updatedConversations = prevState.conversations.map(conv =>
+          conv.id === conversationId
+            ? { ...conv, title: newTitle }
+            : conv
+        );
+
+        const updatedSelectedConversation = prevState.selectedConversation?.id === conversationId
+          ? { ...prevState.selectedConversation, title: newTitle }
+          : prevState.selectedConversation;
+
+        return {
+          conversations: updatedConversations,
+          selectedConversation: updatedSelectedConversation
+        };
+      });
+
+    } catch (error: any) {
+      throw new Error(`Error renaming conversation: ${error.message || 'Unknown error'}`);
+    }
+  };
+
+  /**
+   * Handle deleting a conversation
+   */
+  handleDeleteConversation = async (conversationId: string) => {
+    if (!this.props.services?.api) {
+      throw new Error('API service not available');
+    }
+
+    try {
+      await this.props.services.api.delete(`/api/v1/conversations/${conversationId}`);
+
+      // Update state to remove the conversation
+      this.setState(prevState => {
+        const updatedConversations = prevState.conversations.filter(
+          conv => conv.id !== conversationId
+        );
+
+        // If the deleted conversation was selected, clear selection and start new chat
+        const wasSelected = prevState.selectedConversation?.id === conversationId;
+
+        return {
+          conversations: updatedConversations,
+          selectedConversation: wasSelected ? null : prevState.selectedConversation,
+          conversation_id: wasSelected ? null : prevState.conversation_id,
+          messages: wasSelected ? [] : prevState.messages
+        };
+      }, () => {
+        // If we deleted the selected conversation, add initial greeting if available
+        if (this.state.selectedConversation === null && this.props.initialGreeting) {
+          this.initialGreetingAdded = true;
+          this.addMessageToChat({
+            id: generateId('greeting'),
+            sender: 'ai',
+            content: this.props.initialGreeting,
+            timestamp: new Date().toISOString()
+          });
+        }
+      });
+
+    } catch (error: any) {
+      throw new Error(`Error deleting conversation: ${error.message || 'Unknown error'}`);
+    }
+  };
+
+  /**
    * Load conversation history from the API
    */
-  async loadConversationHistory(conversationId: string) {
+  loadConversationHistory = async (conversationId: string) => {
     if (!this.props.services?.api) {
       this.setState({ error: 'API service not available', isInitializing: false });
       return;
@@ -555,11 +634,11 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     
     try {
       // Clear current conversation without showing initial greeting
-      this.setState({ 
+      this.setState({
         messages: [],
         conversation_id: null,
         isLoadingHistory: true,
-        error: '' 
+        error: ''
       });
       
       // Fetch conversation with messages
@@ -623,6 +702,20 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   }
 
   /**
+   * Focus the input field
+   */
+  focusInput = () => {
+    if (this.inputRef.current) {
+      // Small delay to ensure the UI has updated
+      setTimeout(() => {
+        if (this.inputRef.current) {
+          this.inputRef.current.focus();
+        }
+      }, 100);
+    }
+  };
+
+  /**
    * Handle input change
    */
   handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -680,9 +773,14 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   /**
    * Send prompt to AI provider and handle response
    */
-  async sendPromptToAI(prompt: string) {
-    if (!this.aiService || !this.state.selectedModel) {
-      this.setState({ error: 'AI service or model not available' });
+  sendPromptToAI = async (prompt: string) => {
+    if (!this.aiService || !this.props.services?.api) {
+      this.setState({ error: 'API service not available' });
+      return;
+    }
+
+    if (!this.state.selectedModel) {
+      this.setState({ error: 'Please select a model first' });
       return;
     }
     
@@ -752,16 +850,21 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         isLoading: false
       }), () => {
         this.scrollToBottom();
+        // Focus the input box after response is completed
+        this.focusInput();
       });
       
     } catch (error) {
       // Error in sendPromptToAI
-      this.setState({ 
+      this.setState({
         isLoading: false,
         error: `Error sending prompt: ${error instanceof Error ? error.message : 'Unknown error'}`
+      }, () => {
+        // Focus input even on error so user can try again
+        this.focusInput();
       });
     }
-  }
+  };
 
   render() {
     const { 
@@ -798,6 +901,8 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
             selectedConversation={selectedConversation}
             onConversationSelect={this.handleConversationSelect}
             onNewChatClick={this.handleNewChatClick}
+            onRenameConversation={this.handleRenameConversation}
+            onDeleteConversation={this.handleDeleteConversation}
             showConversationHistory={showConversationHistory}
             useStreaming={useStreaming}
             onToggleStreaming={this.toggleStreamingMode}

@@ -101,7 +101,7 @@ class BrainDriveChatLifecycleManager(BaseLifecycleManager):
         self.plugin_data = {
             "name": "BrainDriveChat",
             "description": "Comprehensive AI chat interface with model selection and conversation history",
-            "version": "1.0.0",
+            "version": "1.0.6",
             "type": "frontend",
             "icon": "MessageSquare",
             "category": "ai",
@@ -115,13 +115,13 @@ class BrainDriveChatLifecycleManager(BaseLifecycleManager):
             "long_description": "A unified AI chat interface that combines AI prompt chat, model selection, and conversation history management in a single, responsive plugin with light/dark theme support.",
             "plugin_slug": "BrainDriveChat",
             # Update tracking fields (matching plugin model)
-            "source_type": "local",
-            "source_url": "local://BrainDriveChat",
-            "update_check_url": None,
+            "source_type": "github",
+            "source_url": "https://github.com/DJJones66/BrainDriveChat",
+            "update_check_url": "https://api.github.com/repos/DJJones66/BrainDriveChat/releases/latest",
             "last_update_check": None,
             "update_available": False,
             "latest_version": None,
-            "installation_type": "local",
+            "installation_type": "remote",
             "permissions": ["storage.read", "storage.write", "api.access"]
         }
         
@@ -172,10 +172,10 @@ class BrainDriveChatLifecycleManager(BaseLifecycleManager):
                 },
                 "messages": {},
                 "required_services": {
-                    "api": {"methods": ["get", "post", "put", "delete"], "version": "1.0.0"},
-                    "event": {"methods": ["sendMessage", "subscribeToMessages"], "version": "1.0.0"},
-                    "theme": {"methods": ["getCurrentTheme", "addThemeChangeListener"], "version": "1.0.0"},
-                    "settings": {"methods": ["get", "set"], "version": "1.0.0"}
+                    "api": {"methods": ["get", "post", "put", "delete", "postStreaming"], "version": "1.0.0"},
+                    "event": {"methods": ["sendMessage", "subscribeToMessages", "unsubscribeFromMessages"], "version": "1.0.0"},
+                    "theme": {"methods": ["getCurrentTheme", "addThemeChangeListener", "removeThemeChangeListener"], "version": "1.0.0"},
+                    "settings": {"methods": ["get", "set", "getSettingDefinitions"], "version": "1.0.0"}
                 },
                 "dependencies": [],
                 "layout": {
@@ -419,8 +419,7 @@ class BrainDriveChatLifecycleManager(BaseLifecycleManager):
                 'bundle_exists': False,
                 'bundle_size': 0,
                 'package_json_valid': False,
-                'assets_present': False,
-                'chat_components_present': False
+                'assets_present': False
             }
             
             # Check bundle file
@@ -443,14 +442,6 @@ class BrainDriveChatLifecycleManager(BaseLifecycleManager):
             assets_path = plugin_dir / "assets"
             if assets_path.exists() and assets_path.is_dir():
                 health_info['assets_present'] = True
-            
-            # Check for chat-specific components
-            src_path = plugin_dir / "src"
-            if src_path.exists() and src_path.is_dir():
-                # Look for chat component files
-                chat_files = list(src_path.rglob('*Chat*')) + list(src_path.rglob('*Model*')) + list(src_path.rglob('*History*'))
-                if chat_files:
-                    health_info['chat_components_present'] = True
             
             # Determine overall health
             is_healthy = (
@@ -510,12 +501,23 @@ class BrainDriveChatLifecycleManager(BaseLifecycleManager):
                         'version': plugin_row.version,
                         'enabled': plugin_row.enabled,
                         'created_at': plugin_row.created_at,
-                        'updated_at': plugin_row.updated_at,
-                        'plugin_slug': plugin_row.plugin_slug
+                        'updated_at': plugin_row.updated_at
                     }
                 }
             else:
-                logger.info(f"BrainDriveChat: No existing plugin found")
+                logger.warning(f"BrainDriveChat: No plugin found for user_id: {user_id}, plugin_slug: {plugin_slug}")
+                
+                # Debug: Check if there are any plugins for this user
+                debug_query = text("SELECT id, plugin_slug FROM plugin WHERE user_id = :user_id")
+                debug_result = await db.execute(debug_query, {'user_id': user_id})
+                debug_rows = debug_result.fetchall()
+                if debug_rows:
+                    logger.info(f"BrainDriveChat: User has {len(debug_rows)} other plugins:")
+                    for row in debug_rows:
+                        logger.info(f"  - {row.plugin_slug} (id: {row.id})")
+                else:
+                    logger.info(f"BrainDriveChat: User has no plugins installed")
+                
                 return {'exists': False}
                 
         except Exception as e:
@@ -525,152 +527,287 @@ class BrainDriveChatLifecycleManager(BaseLifecycleManager):
     async def _create_database_records(self, user_id: str, db: AsyncSession) -> Dict[str, Any]:
         """Create plugin and module records in database"""
         try:
-            plugin_data = self.plugin_data
-            module_data = self.module_data
+            current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            plugin_slug = self.plugin_data['plugin_slug']
+            plugin_id = f"{user_id}_{plugin_slug}"
             
-            logger.info(f"BrainDriveChat: Creating database records for user {user_id}")
+            logger.info(f"BrainDriveChat: Creating database records - user_id: {user_id}, plugin_slug: {plugin_slug}, plugin_id: {plugin_id}")
             
-            # Insert plugin record
-            plugin_insert = text("""
-            INSERT INTO plugin (
-                user_id, name, description, version, type, icon, category, 
-                official, author, compatibility, scope, bundle_method, 
-                bundle_location, is_local, long_description, plugin_slug,
-                source_type, source_url, update_check_url, last_update_check,
-                update_available, latest_version, installation_type, permissions,
-                enabled, created_at, updated_at
-            ) VALUES (
-                :user_id, :name, :description, :version, :type, :icon, :category,
-                :official, :author, :compatibility, :scope, :bundle_method,
-                :bundle_location, :is_local, :long_description, :plugin_slug,
-                :source_type, :source_url, :update_check_url, :last_update_check,
-                :update_available, :latest_version, :installation_type, :permissions,
-                :enabled, :created_at, :updated_at
-            ) RETURNING id
+            plugin_stmt = text("""
+            INSERT INTO plugin
+            (id, name, description, version, type, enabled, icon, category, status,
+            official, author, last_updated, compatibility, downloads, scope,
+            bundle_method, bundle_location, is_local, long_description,
+            config_fields, messages, dependencies, created_at, updated_at, user_id,
+            plugin_slug, source_type, source_url, update_check_url, last_update_check,
+            update_available, latest_version, installation_type, permissions)
+            VALUES
+            (:id, :name, :description, :version, :type, :enabled, :icon, :category,
+            :status, :official, :author, :last_updated, :compatibility, :downloads,
+            :scope, :bundle_method, :bundle_location, :is_local, :long_description,
+            :config_fields, :messages, :dependencies, :created_at, :updated_at, :user_id,
+            :plugin_slug, :source_type, :source_url, :update_check_url, :last_update_check,
+            :update_available, :latest_version, :installation_type, :permissions)
             """)
             
-            now = datetime.datetime.now()
-            plugin_params = {
-                'user_id': user_id,
-                'name': plugin_data['name'],
-                'description': plugin_data['description'],
-                'version': plugin_data['version'],
-                'type': plugin_data['type'],
-                'icon': plugin_data['icon'],
-                'category': plugin_data['category'],
-                'official': plugin_data['official'],
-                'author': plugin_data['author'],
-                'compatibility': plugin_data['compatibility'],
-                'scope': plugin_data['scope'],
-                'bundle_method': plugin_data['bundle_method'],
-                'bundle_location': plugin_data['bundle_location'],
-                'is_local': plugin_data['is_local'],
-                'long_description': plugin_data['long_description'],
-                'plugin_slug': plugin_data['plugin_slug'],
-                'source_type': plugin_data['source_type'],
-                'source_url': plugin_data['source_url'],
-                'update_check_url': plugin_data['update_check_url'],
-                'last_update_check': plugin_data['last_update_check'],
-                'update_available': plugin_data['update_available'],
-                'latest_version': plugin_data['latest_version'],
-                'installation_type': plugin_data['installation_type'],
-                'permissions': json.dumps(plugin_data['permissions']),
+            await db.execute(plugin_stmt, {
+                'id': plugin_id,
+                'name': self.plugin_data['name'],
+                'description': self.plugin_data['description'],
+                'version': self.plugin_data['version'],
+                'type': self.plugin_data['type'],
                 'enabled': True,
-                'created_at': now,
-                'updated_at': now
-            }
+                'icon': self.plugin_data['icon'],
+                'category': self.plugin_data['category'],
+                'status': 'activated',
+                'official': self.plugin_data['official'],
+                'author': self.plugin_data['author'],
+                'last_updated': current_time,
+                'compatibility': self.plugin_data['compatibility'],
+                'downloads': 0,
+                'scope': self.plugin_data['scope'],
+                'bundle_method': self.plugin_data['bundle_method'],
+                'bundle_location': self.plugin_data['bundle_location'],
+                'is_local': self.plugin_data['is_local'],
+                'long_description': self.plugin_data['long_description'],
+                'config_fields': json.dumps({}),
+                'messages': None,
+                'dependencies': None,
+                'created_at': current_time,
+                'updated_at': current_time,
+                'user_id': user_id,
+                'plugin_slug': plugin_slug,
+                'source_type': self.plugin_data['source_type'],
+                'source_url': self.plugin_data['source_url'],
+                'update_check_url': self.plugin_data['update_check_url'],
+                'last_update_check': self.plugin_data['last_update_check'],
+                'update_available': self.plugin_data['update_available'],
+                'latest_version': self.plugin_data['latest_version'],
+                'installation_type': self.plugin_data['installation_type'],
+                'permissions': json.dumps(self.plugin_data['permissions'])
+            })
             
-            result = await db.execute(plugin_insert, plugin_params)
-            plugin_id = result.fetchone()[0]
-            logger.info(f"BrainDriveChat: Created plugin record with ID: {plugin_id}")
-            
-            # Insert module records
             modules_created = []
-            for module in module_data:
-                module_insert = text("""
-                INSERT INTO module (
-                    plugin_id, name, display_name, description, icon, category,
-                    priority, props, config_fields, messages, required_services,
-                    dependencies, layout, tags, created_at, updated_at
-                ) VALUES (
-                    :plugin_id, :name, :display_name, :description, :icon, :category,
-                    :priority, :props, :config_fields, :messages, :required_services,
-                    :dependencies, :layout, :tags, :created_at, :updated_at
-                ) RETURNING id
+            for module_data in self.module_data:
+                module_id = f"{user_id}_{plugin_slug}_{module_data['name']}"
+                
+                module_stmt = text("""
+                INSERT INTO module
+                (id, plugin_id, name, display_name, description, icon, category,
+                enabled, priority, props, config_fields, messages, required_services,
+                dependencies, layout, tags, created_at, updated_at, user_id)
+                VALUES
+                (:id, :plugin_id, :name, :display_name, :description, :icon, :category,
+                :enabled, :priority, :props, :config_fields, :messages, :required_services,
+                :dependencies, :layout, :tags, :created_at, :updated_at, :user_id)
                 """)
                 
-                module_params = {
-                    'plugin_id': plugin_id,
-                    'name': module['name'],
-                    'display_name': module['display_name'],
-                    'description': module['description'],
-                    'icon': module['icon'],
-                    'category': module['category'],
-                    'priority': module['priority'],
-                    'props': json.dumps(module['props']),
-                    'config_fields': json.dumps(module['config_fields']),
-                    'messages': json.dumps(module['messages']),
-                    'required_services': json.dumps(module['required_services']),
-                    'dependencies': json.dumps(module['dependencies']),
-                    'layout': json.dumps(module['layout']),
-                    'tags': json.dumps(module['tags']),
-                    'created_at': now,
-                    'updated_at': now
-                }
-                
-                module_result = await db.execute(module_insert, module_params)
-                module_id = module_result.fetchone()[0]
-                modules_created.append({
+                await db.execute(module_stmt, {
                     'id': module_id,
-                    'name': module['name'],
-                    'display_name': module['display_name']
+                    'plugin_id': plugin_id,
+                    'name': module_data['name'],
+                    'display_name': module_data['display_name'],
+                    'description': module_data['description'],
+                    'icon': module_data['icon'],
+                    'category': module_data['category'],
+                    'enabled': True,
+                    'priority': module_data['priority'],
+                    'props': json.dumps(module_data['props']),
+                    'config_fields': json.dumps(module_data['config_fields']),
+                    'messages': json.dumps(module_data['messages']),
+                    'required_services': json.dumps(module_data['required_services']),
+                    'dependencies': json.dumps(module_data['dependencies']),
+                    'layout': json.dumps(module_data['layout']),
+                    'tags': json.dumps(module_data['tags']),
+                    'created_at': current_time,
+                    'updated_at': current_time,
+                    'user_id': user_id
                 })
-                logger.info(f"BrainDriveChat: Created module record: {module['name']} with ID: {module_id}")
+                
+                modules_created.append(module_id)
             
+            # Commit the transaction
             await db.commit()
-            logger.info(f"BrainDriveChat: Successfully created {len(modules_created)} modules for plugin {plugin_id}")
+            logger.info(f"BrainDriveChat: Database transaction committed successfully")
             
-            return {
-                'success': True,
-                'plugin_id': plugin_id,
-                'modules_created': modules_created
-            }
+            # Verify the plugin was actually created
+            verify_query = text("SELECT id, plugin_slug FROM plugin WHERE id = :plugin_id AND user_id = :user_id")
+            verify_result = await db.execute(verify_query, {'plugin_id': plugin_id, 'user_id': user_id})
+            verify_row = verify_result.fetchone()
+            
+            if verify_row:
+                logger.info(f"BrainDriveChat: Successfully created and verified database records for plugin {plugin_id} with {len(modules_created)} modules")
+            else:
+                logger.error(f"BrainDriveChat: Plugin creation appeared to succeed but verification failed for plugin_id: {plugin_id}")
+                return {'success': False, 'error': 'Plugin creation verification failed'}
+            
+            return {'success': True, 'plugin_id': plugin_id, 'modules_created': modules_created}
             
         except Exception as e:
-            logger.error(f"BrainDriveChat: Error creating database records: {e}")
+            logger.error(f"Error creating database records: {e}")
             await db.rollback()
             return {'success': False, 'error': str(e)}
     
     async def _delete_database_records(self, user_id: str, plugin_id: str, db: AsyncSession) -> Dict[str, Any]:
         """Delete plugin and module records from database"""
         try:
-            logger.info(f"BrainDriveChat: Deleting database records for plugin {plugin_id}")
-            
-            # First get module info before deletion
-            modules_query = text("SELECT id, name FROM module WHERE plugin_id = :plugin_id")
-            modules_result = await db.execute(modules_query, {'plugin_id': plugin_id})
-            modules_to_delete = [{'id': row.id, 'name': row.name} for row in modules_result.fetchall()]
-            
             # Delete modules first (foreign key constraint)
-            delete_modules = text("DELETE FROM module WHERE plugin_id = :plugin_id")
-            await db.execute(delete_modules, {'plugin_id': plugin_id})
+            module_delete_stmt = text("""
+            DELETE FROM module 
+            WHERE plugin_id = :plugin_id AND user_id = :user_id
+            """)
+            
+            module_result = await db.execute(module_delete_stmt, {
+                'plugin_id': plugin_id,
+                'user_id': user_id
+            })
+            
+            deleted_modules = module_result.rowcount
             
             # Delete plugin
-            delete_plugin = text("DELETE FROM plugin WHERE id = :plugin_id AND user_id = :user_id")
-            await db.execute(delete_plugin, {'plugin_id': plugin_id, 'user_id': user_id})
+            plugin_delete_stmt = text("""
+            DELETE FROM plugin 
+            WHERE id = :plugin_id AND user_id = :user_id
+            """)
             
+            plugin_result = await db.execute(plugin_delete_stmt, {
+                'plugin_id': plugin_id,
+                'user_id': user_id
+            })
+            
+            if plugin_result.rowcount == 0:
+                await db.rollback()
+                return {'success': False, 'error': 'Plugin not found or not owned by user'}
+            
+            # Commit the transaction
             await db.commit()
-            logger.info(f"BrainDriveChat: Successfully deleted plugin {plugin_id} and {len(modules_to_delete)} modules")
             
-            return {
-                'success': True,
-                'deleted_modules': modules_to_delete
-            }
+            logger.info(f"Deleted database records for plugin {plugin_id} ({deleted_modules} modules)")
+            return {'success': True, 'deleted_modules': deleted_modules}
             
         except Exception as e:
-            logger.error(f"BrainDriveChat: Error deleting database records: {e}")
+            logger.error(f"Error deleting database records: {e}")
             await db.rollback()
             return {'success': False, 'error': str(e)}
+    
+    async def _export_user_data(self, user_id: str, db: AsyncSession) -> Dict[str, Any]:
+        """Export user-specific data for migration during updates"""
+        try:
+            # Get plugin configuration
+            plugin_query = text("""
+            SELECT config_fields, enabled, status
+            FROM plugin 
+            WHERE user_id = :user_id AND plugin_slug = :plugin_slug
+            """)
+            
+            plugin_result = await db.execute(plugin_query, {
+                'user_id': user_id,
+                'plugin_slug': self.plugin_data['plugin_slug']
+            })
+            
+            plugin_row = plugin_result.fetchone()
+            if not plugin_row:
+                return {'success': False, 'error': 'Plugin not found for user'}
+            
+            # Get module configurations
+            module_query = text("""
+            SELECT name, config_fields, enabled, priority
+            FROM module 
+            WHERE plugin_id LIKE :plugin_pattern AND user_id = :user_id
+            """)
+            
+            module_result = await db.execute(module_query, {
+                'plugin_pattern': f"{user_id}_{self.plugin_data['plugin_slug']}_%",
+                'user_id': user_id
+            })
+            
+            modules_data = {}
+            for module_row in module_result.fetchall():
+                try:
+                    config_fields = json.loads(module_row.config_fields) if module_row.config_fields else {}
+                except json.JSONDecodeError:
+                    config_fields = {}
+                
+                modules_data[module_row.name] = {
+                    'config_fields': config_fields,
+                    'enabled': module_row.enabled,
+                    'priority': module_row.priority
+                }
+            
+            user_data = {
+                'plugin_config': {
+                    'config_fields': json.loads(plugin_row.config_fields) if plugin_row.config_fields else {},
+                    'enabled': plugin_row.enabled,
+                    'status': plugin_row.status
+                },
+                'modules_config': modules_data,
+                'export_timestamp': datetime.datetime.now().isoformat()
+            }
+            
+            logger.info(f"BrainDriveChat: Exported user data for {user_id}")
+            return {'success': True, 'user_data': user_data}
+            
+        except Exception as e:
+            logger.error(f"BrainDriveChat: Error exporting user data: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    async def _import_user_data(self, user_id: str, db: AsyncSession, user_data: Dict[str, Any]):
+        """Import user-specific data after migration during updates"""
+        try:
+            if not user_data:
+                logger.info(f"BrainDriveChat: No user data to import for {user_id}")
+                return
+            
+            plugin_config = user_data.get('plugin_config', {})
+            modules_config = user_data.get('modules_config', {})
+            
+            # Update plugin configuration
+            if plugin_config:
+                plugin_update_stmt = text("""
+                UPDATE plugin 
+                SET config_fields = :config_fields, enabled = :enabled, status = :status
+                WHERE user_id = :user_id AND plugin_slug = :plugin_slug
+                """)
+                
+                await db.execute(plugin_update_stmt, {
+                    'config_fields': json.dumps(plugin_config.get('config_fields', {})),
+                    'enabled': plugin_config.get('enabled', True),
+                    'status': plugin_config.get('status', 'activated'),
+                    'user_id': user_id,
+                    'plugin_slug': self.plugin_data['plugin_slug']
+                })
+            
+            # Update module configurations
+            for module_name, module_config in modules_config.items():
+                module_update_stmt = text("""
+                UPDATE module 
+                SET config_fields = :config_fields, enabled = :enabled, priority = :priority
+                WHERE name = :module_name AND plugin_id LIKE :plugin_pattern AND user_id = :user_id
+                """)
+                
+                await db.execute(module_update_stmt, {
+                    'config_fields': json.dumps(module_config.get('config_fields', {})),
+                    'enabled': module_config.get('enabled', True),
+                    'priority': module_config.get('priority', 1),
+                    'module_name': module_name,
+                    'plugin_pattern': f"{user_id}_{self.plugin_data['plugin_slug']}_%",
+                    'user_id': user_id
+                })
+            
+            logger.info(f"BrainDriveChat: Imported user data for {user_id}")
+            
+        except Exception as e:
+            logger.error(f"BrainDriveChat: Error importing user data: {e}")
+            raise
+    
+    def get_plugin_info(self) -> Dict[str, Any]:
+        """Get plugin information (compatibility method)"""
+        return self.plugin_data
+    
+    @property
+    def MODULE_DATA(self):
+        """Compatibility property for accessing module data"""
+        return self.module_data
     
     # Compatibility methods for old interface
     async def install_plugin(self, user_id: str, db: AsyncSession) -> Dict[str, Any]:
@@ -731,61 +868,119 @@ class BrainDriveChatLifecycleManager(BaseLifecycleManager):
                 return {'success': False, 'error': f'Database operation failed: {str(db_error)}'}
                 
         except Exception as e:
-            logger.error(f"BrainDriveChat: Installation failed for user {user_id}: {e}")
+            logger.error(f"BrainDriveChat: Install plugin failed: {e}")
             return {'success': False, 'error': str(e)}
     
     async def delete_plugin(self, user_id: str, db: AsyncSession) -> Dict[str, Any]:
         """Delete BrainDriveChat plugin for user (compatibility method)"""
-        return await self.uninstall_for_user(user_id, db)
+        try:
+            logger.info(f"BrainDriveChat: Starting deletion for user {user_id}")
+            
+            # Let the base class handle the deletion - it will call _perform_user_uninstallation
+            # which includes the database check
+            result = await self.uninstall_for_user(user_id, db)
+            
+            if result.get('success'):
+                logger.info(f"BrainDriveChat: Successfully deleted plugin for user {user_id}")
+            else:
+                logger.error(f"BrainDriveChat: Deletion failed: {result.get('error')}")
+            
+            return result
+        except Exception as e:
+            logger.error(f"BrainDriveChat: Delete plugin failed: {e}")
+            return {'success': False, 'error': str(e)}
     
     async def get_plugin_status(self, user_id: str, db: AsyncSession) -> Dict[str, Any]:
         """Get current status of BrainDriveChat plugin installation (compatibility method)"""
-        return await self._check_existing_plugin(user_id, db)
+        try:
+            existing_check = await self._check_existing_plugin(user_id, db)
+            if not existing_check['exists']:
+                return {'exists': False, 'status': 'not_installed'}
+            
+            # Check if shared plugin files exist
+            plugin_health = await self._get_plugin_health_impl(user_id, self.shared_path)
+            
+            return {
+                'exists': True,
+                'status': 'healthy' if plugin_health['healthy'] else 'unhealthy',
+                'plugin_id': existing_check['plugin_id'],
+                'plugin_info': existing_check['plugin_info'],
+                'health_details': plugin_health['details']
+            }
+            
+        except Exception as e:
+            logger.error(f"BrainDriveChat: Error checking plugin status: {e}")
+            return {'exists': False, 'status': 'error', 'error': str(e)}
+    
+    async def update_plugin(self, user_id: str, db: AsyncSession, new_version_manager: 'BrainDriveChatLifecycleManager') -> Dict[str, Any]:
+        """Update BrainDriveChat plugin for user (compatibility method)"""
+        try:
+            # Export current user data
+            export_result = await self._export_user_data(user_id, db)
+            if not export_result['success']:
+                return export_result
+            
+            # Uninstall current version
+            uninstall_result = await self.uninstall_for_user(user_id, db)
+            if not uninstall_result['success']:
+                return uninstall_result
+            
+            # Install new version
+            install_result = await new_version_manager.install_for_user(user_id, db, new_version_manager.shared_path)
+            if not install_result['success']:
+                return install_result
+            
+            # Import user data to new version
+            await new_version_manager._import_user_data(user_id, db, export_result.get('user_data', {}))
+            
+            logger.info(f"BrainDriveChat: Plugin updated successfully for user {user_id}")
+            return {
+                'success': True,
+                'old_version': self.version,
+                'new_version': new_version_manager.version,
+                'plugin_id': install_result['plugin_id']
+            }
+            
+        except Exception as e:
+            logger.error(f"BrainDriveChat: Plugin update failed for user {user_id}: {e}")
+            return {'success': False, 'error': str(e)}
 
 
-# Compatibility methods for remote installer
+# Standalone functions for compatibility with remote installer
 async def install_plugin(user_id: str, db: AsyncSession, plugins_base_dir: str = None) -> Dict[str, Any]:
-    """Install BrainDriveChat plugin for specific user (compatibility method)"""
     manager = BrainDriveChatLifecycleManager(plugins_base_dir)
-    return await manager.install_for_user(user_id, db, manager.shared_path)
+    return await manager.install_plugin(user_id, db)
 
 async def delete_plugin(user_id: str, db: AsyncSession, plugins_base_dir: str = None) -> Dict[str, Any]:
-    """Delete BrainDriveChat plugin for user (compatibility method)"""
     manager = BrainDriveChatLifecycleManager(plugins_base_dir)
-    return await manager.uninstall_for_user(user_id, db)
+    return await manager.delete_plugin(user_id, db)
 
 async def get_plugin_status(user_id: str, db: AsyncSession, plugins_base_dir: str = None) -> Dict[str, Any]:
-    """Get current status of BrainDriveChat plugin installation (compatibility method)"""
     manager = BrainDriveChatLifecycleManager(plugins_base_dir)
-    return await manager._check_existing_plugin(user_id, db)
+    return await manager.get_plugin_status(user_id, db)
+
+async def update_plugin(user_id: str, db: AsyncSession, new_version_manager: 'BrainDriveChatLifecycleManager', plugins_base_dir: str = None) -> Dict[str, Any]:
+    old_manager = BrainDriveChatLifecycleManager(plugins_base_dir)
+    return await old_manager.update_plugin(user_id, db, new_version_manager)
 
 
+# Test script for development
 if __name__ == "__main__":
     import sys
     import asyncio
     
     async def main():
-        # Test the lifecycle manager
-        manager = BrainDriveChatLifecycleManager()
-        
-        print("BrainDriveChat Plugin Lifecycle Manager")
+        print("BrainDriveChat Plugin Lifecycle Manager - Test Mode")
         print("=" * 50)
+        
+        # Test manager initialization
+        manager = BrainDriveChatLifecycleManager()
         print(f"Plugin: {manager.plugin_data['name']}")
         print(f"Version: {manager.plugin_data['version']}")
-        print(f"Description: {manager.plugin_data['description']}")
+        print(f"Slug: {manager.plugin_data['plugin_slug']}")
         print(f"Modules: {len(manager.module_data)}")
         
-        # Display module information
-        for i, module in enumerate(manager.module_data, 1):
-            print(f"\nModule {i}:")
-            print(f"  Name: {module['name']}")
-            print(f"  Display Name: {module['display_name']}")
-            print(f"  Description: {module['description']}")
+        for module in manager.module_data:
+            print(f"  - {module['display_name']} ({module['name']})")
     
-    if len(sys.argv) > 1:
-        if sys.argv[1] == "test":
-            asyncio.run(main())
-        else:
-            print("Usage: python lifecycle_manager.py [test]")
-    else:
-        print("BrainDriveChat Lifecycle Manager loaded successfully")
+    asyncio.run(main())

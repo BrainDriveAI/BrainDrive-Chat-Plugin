@@ -1,71 +1,69 @@
-const path = require('path');
-const HtmlWebpackPlugin = require('html-webpack-plugin');
+const path = require("path");
+const HtmlWebpackPlugin = require("html-webpack-plugin");
+const { ModuleFederationPlugin } = require("webpack").container;
+const deps = require("./package.json").dependencies;
 
 module.exports = {
-  entry: './src/index.tsx',
-  mode: 'production',
-  devtool: 'source-map',
-  
-  resolve: {
-    extensions: ['.tsx', '.ts', '.js', '.jsx'],
+  mode: "development",
+  entry: "./src/index",
+  output: {
+    path: path.resolve(__dirname, '/home/hacker/BrainDriveDev/BrainDrivePrivate/backend/plugins/shared/BrainDriveChat/v1.0.5/dist'),
+    publicPath: "auto",
+    clean: true,
+    library: {
+      type: 'var',
+      name: 'BrainDriveChat'
+    }
   },
-  
+  resolve: {
+    extensions: [".tsx", ".ts", ".js"],
+  },
   module: {
     rules: [
       {
-        test: /\.tsx?$/,
-        use: {
-          loader: 'ts-loader',
-          options: {
-            transpileOnly: false,
-            configFile: 'tsconfig.json'
-          }
-        },
+        test: /\.(ts|tsx)$/,
+        use: "ts-loader",
         exclude: /node_modules/,
       },
       {
-        test: /\.css$/i,
-        use: ['style-loader', 'css-loader'],
-      },
+        test: /\.css$/,
+        use: [
+          'style-loader',
+          'css-loader'
+        ]
+      }
     ],
   },
-  
   plugins: [
+    new ModuleFederationPlugin({
+      name: "BrainDriveChat",
+      library: { type: "var", name: "BrainDriveChat" },
+      filename: "remoteEntry.js",
+      exposes: {
+        "./BrainDriveChat": "./src/index",
+      },
+      shared: {
+        react: {
+          singleton: true,
+          requiredVersion: deps.react,
+          eager: true
+        },
+        "react-dom": {
+          singleton: true,
+          requiredVersion: deps["react-dom"],
+          eager: true
+        }
+      }
+    }),
     new HtmlWebpackPlugin({
-      template: './public/index.html',
-      filename: 'index.html',
+      template: "./public/index.html",
     }),
   ],
-  
-  output: {
-    filename: 'remoteEntry.js',
-    path: path.resolve(__dirname, 'dist'),
-    clean: true,
-    library: {
-      type: 'module',
-    },
-  },
-  
-  experiments: {
-    outputModule: true,
-  },
-  
-  externals: {
-    react: 'react',
-    'react-dom': 'react-dom',
-  },
-  
   devServer: {
-    static: {
-      directory: path.join(__dirname, 'dist'),
-    },
-    compress: true,
     port: 3001,
-    hot: true,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
-      'Access-Control-Allow-Headers': 'X-Requested-With, content-type, Authorization',
+    static: {
+      directory: path.join(__dirname, "public"),
     },
+    hot: true,
   },
 };
