@@ -7,7 +7,7 @@ module.exports = {
   mode: "development",
   entry: "./src/index",
   output: {
-    path: path.resolve(__dirname, '/home/hacker/BrainDriveDev/BrainDrivePrivate/backend/plugins/shared/BrainDriveChat/v1.0.5/dist'),
+    path: path.resolve(__dirname, 'dist'),
     publicPath: "auto",
     clean: true,
     library: {

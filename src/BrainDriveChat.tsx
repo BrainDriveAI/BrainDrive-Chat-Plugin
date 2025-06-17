@@ -40,9 +40,6 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   constructor(props: BrainDriveChatProps) {
     super(props);
     
-    // Initialize streaming mode from settings or props
-    const savedStreamingMode = this.getSavedStreamingMode();
-    
     this.state = {
       // Chat state
       messages: [],
@@ -51,11 +48,9 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       error: '',
       currentTheme: 'light',
       selectedModel: null,
-      useStreaming: savedStreamingMode !== null
-        ? savedStreamingMode
-        : props.defaultStreamingMode !== undefined 
-          ? !!props.defaultStreamingMode 
-          : true,
+      useStreaming: props.defaultStreamingMode !== undefined
+        ? !!props.defaultStreamingMode
+        : true,
       conversation_id: null,
       isLoadingHistory: false,
       currentUserId: null,
@@ -85,6 +80,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   componentDidMount() {
     this.initializeThemeService();
     this.loadInitialData();
+    this.loadSavedStreamingMode();
     
     // Set initialization timeout
     setTimeout(() => {
@@ -138,10 +134,10 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   /**
    * Get saved streaming mode from settings
    */
-  getSavedStreamingMode = (): boolean | null => {
+  getSavedStreamingMode = async (): Promise<boolean | null> => {
     try {
-      if (this.props.services?.settings) {
-        const savedValue = this.props.services.settings.get(this.STREAMING_SETTING_KEY);
+      if (this.props.services?.settings?.getSetting) {
+        const savedValue = await this.props.services.settings.getSetting(this.STREAMING_SETTING_KEY);
         if (typeof savedValue === 'boolean') {
           return savedValue;
         }
@@ -153,12 +149,26 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   }
 
   /**
+   * Load saved streaming mode from settings
+   */
+  loadSavedStreamingMode = async (): Promise<void> => {
+    try {
+      const savedStreamingMode = await this.getSavedStreamingMode();
+      if (savedStreamingMode !== null) {
+        this.setState({ useStreaming: savedStreamingMode });
+      }
+    } catch (error) {
+      // Error loading streaming mode, use default
+    }
+  }
+
+  /**
    * Save streaming mode to settings
    */
   saveStreamingMode = async (enabled: boolean): Promise<void> => {
     try {
-      if (this.props.services?.settings) {
-        await this.props.services.settings.set(this.STREAMING_SETTING_KEY, enabled);
+      if (this.props.services?.settings?.setSetting) {
+        await this.props.services.settings.setSetting(this.STREAMING_SETTING_KEY, enabled);
       }
     } catch (error) {
       // Error saving streaming mode

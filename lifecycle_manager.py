@@ -101,7 +101,7 @@ class BrainDriveChatLifecycleManager(BaseLifecycleManager):
         self.plugin_data = {
             "name": "BrainDriveChat",
             "description": "Comprehensive AI chat interface with model selection and conversation history",
-            "version": "1.0.6",
+            "version": "1.0.8",
             "type": "frontend",
             "icon": "MessageSquare",
             "category": "ai",
@@ -175,7 +175,7 @@ class BrainDriveChatLifecycleManager(BaseLifecycleManager):
                     "api": {"methods": ["get", "post", "put", "delete", "postStreaming"], "version": "1.0.0"},
                     "event": {"methods": ["sendMessage", "subscribeToMessages", "unsubscribeFromMessages"], "version": "1.0.0"},
                     "theme": {"methods": ["getCurrentTheme", "addThemeChangeListener", "removeThemeChangeListener"], "version": "1.0.0"},
-                    "settings": {"methods": ["get", "set", "getSettingDefinitions"], "version": "1.0.0"}
+                    "settings": {"methods": ["getSetting", "setSetting", "getSettingDefinitions"], "version": "1.0.0"}
                 },
                 "dependencies": [],
                 "layout": {
