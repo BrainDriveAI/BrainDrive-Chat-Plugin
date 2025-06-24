@@ -842,6 +842,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         this.state.selectedModel,
         this.state.useStreaming,
         this.state.conversation_id,
+        this.props.conversationType || "chat",
         onChunk,
         onConversationId
       );

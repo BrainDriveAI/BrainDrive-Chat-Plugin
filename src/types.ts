@@ -23,6 +23,7 @@ export interface ConversationInfo {
   user_id: string;
   model?: string;
   server?: string;
+  conversation_type: string;
   created_at: string;
   updated_at?: string;
 }
@@ -91,6 +92,7 @@ export interface BrainDriveChatProps {
   initialGreeting?: string;
   defaultStreamingMode?: boolean;
   promptQuestion?: string;
+  conversationType?: string;
 }
 
 // Component state

@@ -34,6 +34,7 @@ export class AIService {
     selectedModel: ModelInfo,
     useStreaming: boolean,
     conversationId: string | null,
+    conversationType: string = "chat",
     onChunk: (chunk: string) => void,
     onConversationId: (id: string) => void
   ): Promise<boolean> {
@@ -65,7 +66,8 @@ export class AIService {
       },
       stream: useStreaming,
       user_id: this.currentUserId || 'current',
-      conversation_id: conversationId
+      conversation_id: conversationId,
+      conversation_type: conversationType
     };
 
     try {
