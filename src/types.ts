@@ -78,11 +78,23 @@ export interface SettingsService {
   getSettingDefinitions?: () => Promise<any>;
 }
 
+// Page context service interface
+export interface PageContextService {
+  getCurrentPageContext(): {
+    pageId: string;
+    pageName: string;
+    pageRoute: string;
+    isStudioPage: boolean;
+  } | null;
+  onPageContextChange(callback: (context: any) => void): () => void;
+}
+
 export interface Services {
   api?: ApiService;
   event?: EventService;
   theme?: ThemeService;
   settings?: SettingsService;
+  pageContext?: PageContextService;
 }
 
 // Component props
@@ -92,7 +104,7 @@ export interface BrainDriveChatProps {
   initialGreeting?: string;
   defaultStreamingMode?: boolean;
   promptQuestion?: string;
-  conversationType?: string;
+  conversationType?: string; // Allow plugins to specify their type
 }
 
 // Component state

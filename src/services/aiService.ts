@@ -34,9 +34,10 @@ export class AIService {
     selectedModel: ModelInfo,
     useStreaming: boolean,
     conversationId: string | null,
-    conversationType: string = "chat",
+    conversationType: string = "chat", // New parameter
     onChunk: (chunk: string) => void,
-    onConversationId: (id: string) => void
+    onConversationId: (id: string) => void,
+    pageContext?: any // New parameter for page context
   ): Promise<boolean> {
     if (!this.services?.api) {
       throw new Error('API service not available');
@@ -51,7 +52,7 @@ export class AIService {
     const endpoint = '/api/v1/ai/providers/chat';
 
     // Create request params for production endpoint
-    const requestParams = {
+    const requestParams: any = {
       provider: selectedModel.provider || 'ollama',
       settings_id: selectedModel.providerId || 'ollama_servers_settings',
       server_id: selectedModel.serverId,
@@ -67,8 +68,18 @@ export class AIService {
       stream: useStreaming,
       user_id: this.currentUserId || 'current',
       conversation_id: conversationId,
-      conversation_type: conversationType
+      conversation_type: conversationType // New field
     };
+
+    // Add page context if available
+    if (pageContext) {
+      requestParams.page_id = pageContext.pageId;
+      requestParams.page_context = JSON.stringify({
+        pageName: pageContext.pageName,
+        pageRoute: pageContext.pageRoute,
+        isStudioPage: pageContext.isStudioPage
+      });
+    }
 
     try {
       let success = false;

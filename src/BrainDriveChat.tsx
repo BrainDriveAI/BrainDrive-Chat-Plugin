@@ -32,6 +32,8 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   private chatHistoryRef = React.createRef<HTMLDivElement>();
   private inputRef = React.createRef<HTMLTextAreaElement>();
   private themeChangeListener: ((theme: string) => void) | null = null;
+  private pageContextUnsubscribe: (() => void) | null = null;
+  private currentPageContext: any = null;
   private readonly STREAMING_SETTING_KEY = 'ai_prompt_chat_streaming_enabled';
   private initialGreetingAdded = false;
   private debouncedScrollToBottom: () => void;
@@ -79,6 +81,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
 
   componentDidMount() {
     this.initializeThemeService();
+    this.initializePageContextService();
     this.loadInitialData();
     this.loadSavedStreamingMode();
     
@@ -119,6 +122,11 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     if (this.themeChangeListener && this.props.services?.theme) {
       this.props.services.theme.removeThemeChangeListener(this.themeChangeListener);
     }
+    
+    // Clean up page context subscription
+    if (this.pageContextUnsubscribe) {
+      this.pageContextUnsubscribe();
+    }
   }
 
   /**
@@ -132,12 +140,31 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   }
 
   /**
-   * Get saved streaming mode from settings
+   * Get page-specific setting key with fallback to global
+   */
+  private getSettingKey(baseSetting: string): string {
+    const pageContext = this.getCurrentPageContext();
+    if (pageContext?.pageId) {
+      return `page_${pageContext.pageId}_${baseSetting}`;
+    }
+    return baseSetting; // Fallback to global
+  }
+
+  /**
+   * Get saved streaming mode from settings (page-specific with global fallback)
    */
   getSavedStreamingMode = async (): Promise<boolean | null> => {
     try {
       if (this.props.services?.settings?.getSetting) {
-        const savedValue = await this.props.services.settings.getSetting(this.STREAMING_SETTING_KEY);
+        // Try page-specific setting first
+        const pageSpecificKey = this.getSettingKey(this.STREAMING_SETTING_KEY);
+        let savedValue = await this.props.services.settings.getSetting(pageSpecificKey);
+        
+        // Fallback to global setting if page-specific doesn't exist
+        if (savedValue === null || savedValue === undefined) {
+          savedValue = await this.props.services.settings.getSetting(this.STREAMING_SETTING_KEY);
+        }
+        
         if (typeof savedValue === 'boolean') {
           return savedValue;
         }
@@ -163,12 +190,14 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   }
 
   /**
-   * Save streaming mode to settings
+   * Save streaming mode to settings (page-specific)
    */
   saveStreamingMode = async (enabled: boolean): Promise<void> => {
     try {
       if (this.props.services?.settings?.setSetting) {
-        await this.props.services.settings.setSetting(this.STREAMING_SETTING_KEY, enabled);
+        // Save to page-specific setting key
+        const pageSpecificKey = this.getSettingKey(this.STREAMING_SETTING_KEY);
+        await this.props.services.settings.setSetting(pageSpecificKey, enabled);
       }
     } catch (error) {
       // Error saving streaming mode
@@ -213,6 +242,40 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         // Error initializing theme service
       }
     }
+  }
+
+  /**
+   * Initialize the page context service to listen for page changes
+   */
+  initializePageContextService = () => {
+    if (this.props.services?.pageContext) {
+      try {
+        // Get initial page context
+        this.currentPageContext = this.props.services.pageContext.getCurrentPageContext();
+        
+        // Subscribe to page context changes
+        this.pageContextUnsubscribe = this.props.services.pageContext.onPageContextChange(
+          (context) => {
+            this.currentPageContext = context;
+            // Reload conversations when page changes to show page-specific conversations
+            this.fetchConversations();
+          }
+        );
+      } catch (error) {
+        // Error initializing page context service
+        console.warn('Failed to initialize page context service:', error);
+      }
+    }
+  }
+
+  /**
+   * Helper method to get current page context
+   */
+  private getCurrentPageContext() {
+    if (this.props.services?.pageContext) {
+      return this.props.services.pageContext.getCurrentPageContext();
+    }
+    return this.currentPageContext;
   }
 
   /**
@@ -359,15 +422,23 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         throw new Error('Could not get current user ID');
       }
       
+      // Get current page context for page-specific conversations
+      const pageContext = this.getCurrentPageContext();
+      const params: any = {
+        skip: 0,
+        limit: 50, // Fetch up to 50 conversations
+        conversation_type: this.props.conversationType || "chat" // Filter by conversation type
+      };
+      
+      // Add page_id if available for page-specific conversations
+      if (pageContext?.pageId) {
+        params.page_id = pageContext.pageId;
+      }
+      
       // Use the user ID as is - backend now handles IDs with or without dashes
       const response = await this.props.services.api.get(
         `/api/v1/users/${userId}/conversations`,
-        {
-          params: {
-            skip: 0,
-            limit: 50 // Fetch up to 50 conversations
-          }
-        }
+        { params }
       );
       
       let conversations = [];
@@ -836,6 +907,9 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         });
       };
       
+      // Get current page context to pass to AI service
+      const pageContext = this.getCurrentPageContext();
+      
       // Send prompt to AI
       await this.aiService.sendPrompt(
         prompt,
@@ -844,7 +918,8 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         this.state.conversation_id,
         this.props.conversationType || "chat",
         onChunk,
-        onConversationId
+        onConversationId,
+        pageContext
       );
       
       // Finalize the message
@@ -956,6 +1031,6 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
 }
 
 // Add version information for debugging and tracking
-(BrainDriveChat as any).version = '1.0.0';
+(BrainDriveChat as any).version = '1.0.10';
 
 export default BrainDriveChat;
