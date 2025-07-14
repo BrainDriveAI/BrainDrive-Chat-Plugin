@@ -269,17 +269,24 @@
 /* Redesigned Chat Header Styles */
 .chat-header-redesigned {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto auto 1fr auto;
   align-items: center;
   padding: 1rem 1.25rem;
   border-bottom: 1px solid var(--border-color);
   background-color: var(--paper-bg);
   flex-shrink: 0;
-  gap: 2rem;
+  gap: 1.5rem;
   min-height: 64px;
 }
 
 .header-model-section {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  justify-self: start;
+}
+
+.header-persona-section {
   display: flex;
   align-items: center;
   gap: 0.75rem;
@@ -336,8 +343,13 @@
 }
 
 .header-model-section .header-select {
-  min-width: 180px;
-  max-width: 220px;
+  min-width: 160px;
+  max-width: 180px;
+}
+
+.header-persona-section .header-select {
+  min-width: 140px;
+  max-width: 160px;
 }
 
 .header-select-history {
@@ -675,14 +687,34 @@
 }
 
 /* Responsive Design for Redesigned Header */
-@media (max-width: 1200px) {
+@media (min-width: 1400px) {
   .chat-header-redesigned {
-    grid-template-columns: auto 1fr auto;
-    gap: 1.5rem;
+    gap: 2rem;
   }
   
   .header-model-section .header-select {
+    min-width: 180px;
+    max-width: 200px;
+  }
+  
+  .header-persona-section .header-select {
+    min-width: 160px;
     max-width: 180px;
+  }
+}
+
+@media (max-width: 1200px) {
+  .chat-header-redesigned {
+    grid-template-columns: auto auto 1fr auto;
+    gap: 1rem;
+  }
+  
+  .header-model-section .header-select {
+    max-width: 150px;
+  }
+  
+  .header-persona-section .header-select {
+    max-width: 140px;
   }
 }
 
@@ -699,19 +731,29 @@
     order: 1;
   }
 
+  .header-persona-section {
+    justify-self: stretch;
+    order: 2;
+  }
+
   .header-history-section {
     justify-self: stretch;
     max-width: none;
-    order: 2;
+    order: 3;
   }
 
   .header-actions-section {
     justify-self: center;
-    order: 3;
+    order: 4;
     gap: 0.75rem;
   }
 
   .header-model-section .header-select {
+    max-width: none;
+    flex: 1;
+  }
+
+  .header-persona-section .header-select {
     max-width: none;
     flex: 1;
   }

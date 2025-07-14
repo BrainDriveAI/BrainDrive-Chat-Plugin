@@ -4,7 +4,9 @@ import {
   BrainDriveChatProps,
   BrainDriveChatState,
   ChatMessage,
-  ModelInfo
+  ModelInfo,
+  PersonaInfo,
+  ConversationWithPersona
 } from './types';
 import {
   generateId,
@@ -69,7 +71,13 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       
       // UI state
       showModelSelection: true,
-      showConversationHistory: true
+      showConversationHistory: true,
+      
+      // Persona state
+      personas: props.availablePersonas || [],
+      selectedPersona: props.defaultPersona || null,
+      isLoadingPersonas: !props.availablePersonas,
+      showPersonaSelection: props.showPersonaSelection !== false
     };
     
     // Bind methods
@@ -84,18 +92,21 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     this.initializePageContextService();
     this.loadInitialData();
     this.loadSavedStreamingMode();
+    this.loadPersonas();
     
     // Set initialization timeout
     setTimeout(() => {
       if (!this.state.conversation_id) {
-        // Add initial greeting if provided and not already added
-        if (this.props.initialGreeting && !this.initialGreetingAdded) {
+        // Prioritize persona sample greeting over default initial greeting
+        const greetingContent = this.state.selectedPersona?.sample_greeting || this.props.initialGreeting;
+        
+        if (greetingContent && !this.initialGreetingAdded) {
           this.initialGreetingAdded = true;
           
           const greetingMessage: ChatMessage = {
             id: generateId('greeting'),
             sender: 'ai',
-            content: this.props.initialGreeting,
+            content: greetingContent,
             timestamp: new Date().toISOString()
           };
           
@@ -277,6 +288,36 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     }
     return this.currentPageContext;
   }
+
+  /**
+   * Load personas from API or use provided personas
+   */
+  loadPersonas = async () => {
+    if (this.props.availablePersonas) {
+      // Use provided personas
+      return;
+    }
+    
+    this.setState({ isLoadingPersonas: true });
+    
+    try {
+      if (this.props.services?.api) {
+        const response = await this.props.services.api.get('/api/v1/personas');
+        this.setState({
+          personas: response.personas || [],
+          isLoadingPersonas: false
+        });
+      } else {
+        this.setState({ isLoadingPersonas: false });
+      }
+    } catch (error) {
+      console.error('Error loading personas:', error);
+      this.setState({
+        personas: [],
+        isLoadingPersonas: false
+      });
+    }
+  };
 
   /**
    * Load provider settings and models
@@ -504,9 +545,9 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         selectedConversation: mostRecentConversation,
         isLoadingHistory: false
       }, () => {
-        // Load the most recent conversation if available
+        // Load the most recent conversation if available with persona and model restoration
         if (mostRecentConversation) {
-          this.loadConversationHistory(mostRecentConversation.id);
+          this.loadConversationWithPersona(mostRecentConversation.id);
         }
       });
     } catch (error: any) {
@@ -596,8 +637,31 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     
     if (selectedConversation) {
       this.setState({ selectedConversation }, () => {
-        this.loadConversationHistory(conversationId);
+        // Use the new persona-aware conversation loading method
+        this.loadConversationWithPersona(conversationId);
       });
+    }
+  };
+
+  /**
+   * Handle persona selection
+   */
+  handlePersonaChange = async (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const personaId = event.target.value;
+    const selectedPersona = personaId
+      ? this.state.personas.find(p => p.id === personaId) || null
+      : null;
+    
+    this.setState({ selectedPersona });
+
+    // If we have an active conversation, update its persona
+    if (this.state.conversation_id) {
+      try {
+        await this.updateConversationPersona(this.state.conversation_id, personaId || null);
+      } catch (error) {
+        console.error('Failed to update conversation persona:', error);
+        // Could show a user-friendly error message here
+      }
     }
   };
 
@@ -605,18 +669,20 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
    * Handle new chat button click
    */
   handleNewChatClick = () => {
-    this.setState({ 
+    this.setState({
       selectedConversation: null,
       conversation_id: null,
       messages: []
     }, () => {
-      // Add initial greeting if provided
-      if (this.props.initialGreeting) {
+      // Prioritize persona sample greeting over default initial greeting
+      const greetingContent = this.state.selectedPersona?.sample_greeting || this.props.initialGreeting;
+      
+      if (greetingContent) {
         this.initialGreetingAdded = true;
         this.addMessageToChat({
           id: generateId('greeting'),
           sender: 'ai',
-          content: this.props.initialGreeting,
+          content: greetingContent,
           timestamp: new Date().toISOString()
         });
       }
@@ -687,15 +753,19 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
           messages: wasSelected ? [] : prevState.messages
         };
       }, () => {
-        // If we deleted the selected conversation, add initial greeting if available
-        if (this.state.selectedConversation === null && this.props.initialGreeting) {
-          this.initialGreetingAdded = true;
-          this.addMessageToChat({
-            id: generateId('greeting'),
-            sender: 'ai',
-            content: this.props.initialGreeting,
-            timestamp: new Date().toISOString()
-          });
+        // If we deleted the selected conversation, add greeting if available (prioritize persona greeting)
+        if (this.state.selectedConversation === null) {
+          const greetingContent = this.state.selectedPersona?.sample_greeting || this.props.initialGreeting;
+          
+          if (greetingContent) {
+            this.initialGreetingAdded = true;
+            this.addMessageToChat({
+              id: generateId('greeting'),
+              sender: 'ai',
+              content: greetingContent,
+              timestamp: new Date().toISOString()
+            });
+          }
         }
       });
 
@@ -763,6 +833,110 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       });
     }
   }
+
+  /**
+   * Load conversation history with persona and model auto-selection
+   */
+  loadConversationWithPersona = async (conversationId: string) => {
+    if (!this.props.services?.api || !this.aiService) {
+      this.setState({ error: 'API service not available', isInitializing: false });
+      return;
+    }
+    
+    try {
+      // Clear current conversation without showing initial greeting
+      this.setState({
+        messages: [],
+        conversation_id: null,
+        isLoadingHistory: true,
+        error: ''
+      });
+      
+      // Get the selected conversation from state to access model/server info
+      const selectedConversation = this.state.selectedConversation;
+      
+      // Try to fetch conversation with persona details first
+      let conversationWithPersona: ConversationWithPersona | null = null;
+      try {
+        conversationWithPersona = await this.aiService.loadConversationWithPersona(conversationId);
+      } catch (error) {
+        // If the new endpoint doesn't exist yet, fall back to regular conversation loading
+        console.warn('Persona-aware conversation loading not available, falling back to regular loading');
+        // Use the selected conversation data we already have
+        conversationWithPersona = selectedConversation;
+      }
+      
+      // Restore persona selection
+      if (conversationWithPersona?.persona) {
+        const persona = conversationWithPersona.persona;
+        // Check if this persona exists in our current personas list
+        const existingPersona = this.state.personas.find(p => p.id === persona.id);
+        if (existingPersona) {
+          this.setState({ selectedPersona: existingPersona });
+        } else {
+          // Add the persona to our list if it's not there
+          this.setState(prevState => ({
+            personas: [...prevState.personas, persona],
+            selectedPersona: persona
+          }));
+        }
+      } else if (conversationWithPersona?.persona_id) {
+        // If we have a persona_id but no full persona data, try to find it in our list
+        const existingPersona = this.state.personas.find(p => p.id === conversationWithPersona.persona_id);
+        if (existingPersona) {
+          this.setState({ selectedPersona: existingPersona });
+        }
+      }
+      
+      // Restore model selection from conversation data
+      if (conversationWithPersona?.model && conversationWithPersona?.server) {
+        // Find the matching model in our models list
+        const matchingModel = this.state.models.find(model =>
+          model.name === conversationWithPersona.model &&
+          model.serverName === conversationWithPersona.server
+        );
+        
+        if (matchingModel) {
+          this.setState({ selectedModel: matchingModel });
+        } else {
+          // If we can't find the exact model, create a temporary model object
+          // This handles cases where the model might not be in the current list
+          const tempModel: ModelInfo = {
+            name: conversationWithPersona.model,
+            provider: 'ollama', // Default provider
+            providerId: 'ollama_servers_settings', // Default provider ID
+            serverName: conversationWithPersona.server,
+            serverId: 'unknown' // We don't have the server ID from conversation data
+          };
+          this.setState({ selectedModel: tempModel });
+        }
+      }
+      
+      // Now load the conversation messages using the regular method
+      await this.loadConversationHistory(conversationId);
+      
+    } catch (error) {
+      console.error('Error loading conversation with persona:', error);
+      // Fall back to regular conversation loading
+      await this.loadConversationHistory(conversationId);
+    }
+  };
+
+  /**
+   * Update conversation's persona
+   */
+  updateConversationPersona = async (conversationId: string, personaId: string | null) => {
+    if (!this.aiService) {
+      throw new Error('AI service not available');
+    }
+
+    try {
+      await this.aiService.updateConversationPersona(conversationId, personaId);
+    } catch (error) {
+      console.error('Error updating conversation persona:', error);
+      throw error;
+    }
+  };
 
   /**
    * Add a new message to the chat history
@@ -919,7 +1093,8 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         this.props.conversationType || "chat",
         onChunk,
         onConversationId,
-        pageContext
+        pageContext,
+        this.state.selectedPersona || undefined
       );
       
       // Finalize the message
@@ -953,13 +1128,13 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   };
 
   render() {
-    const { 
-      inputText, 
-      messages, 
-      isLoading, 
-      isLoadingHistory, 
-      useStreaming, 
-      error, 
+    const {
+      inputText,
+      messages,
+      isLoading,
+      isLoadingHistory,
+      useStreaming,
+      error,
       isInitializing,
       models,
       isLoadingModels,
@@ -967,7 +1142,11 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       conversations,
       selectedConversation,
       showModelSelection,
-      showConversationHistory
+      showConversationHistory,
+      personas,
+      selectedPersona,
+      isLoadingPersonas,
+      showPersonaSelection
     } = this.state;
     
     const { promptQuestion } = this.props;
@@ -983,6 +1162,11 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
             isLoadingModels={isLoadingModels}
             onModelChange={this.handleModelChange}
             showModelSelection={showModelSelection}
+            personas={personas}
+            selectedPersona={selectedPersona}
+            isLoadingPersonas={isLoadingPersonas}
+            onPersonaChange={this.handlePersonaChange}
+            showPersonaSelection={showPersonaSelection}
             conversations={conversations}
             selectedConversation={selectedConversation}
             onConversationSelect={this.handleConversationSelect}
@@ -1031,6 +1215,6 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
 }
 
 // Add version information for debugging and tracking
-(BrainDriveChat as any).version = '1.0.10';
+(BrainDriveChat as any).version = '1.0.0';
 
 export default BrainDriveChat;

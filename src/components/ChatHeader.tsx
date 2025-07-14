@@ -1,5 +1,5 @@
 import React from 'react';
-import { ModelInfo, ConversationInfo } from '../types';
+import { ModelInfo, ConversationInfo, PersonaInfo } from '../types';
 import { formatRelativeTime } from '../utils';
 
 interface ChatHeaderProps {
@@ -9,6 +9,13 @@ interface ChatHeaderProps {
   isLoadingModels: boolean;
   onModelChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
   showModelSelection: boolean;
+  
+  // Persona selection props
+  personas: PersonaInfo[];
+  selectedPersona: PersonaInfo | null;
+  isLoadingPersonas: boolean;
+  onPersonaChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
+  showPersonaSelection: boolean;
   
   // Conversation history props
   conversations: ConversationInfo[];
@@ -176,6 +183,11 @@ class ChatHeader extends React.Component<ChatHeaderProps, ChatHeaderState> {
       isLoadingModels,
       onModelChange,
       showModelSelection,
+      personas,
+      selectedPersona,
+      isLoadingPersonas,
+      onPersonaChange,
+      showPersonaSelection,
       conversations,
       selectedConversation,
       onConversationSelect,
@@ -217,6 +229,29 @@ class ChatHeader extends React.Component<ChatHeaderProps, ChatHeaderState> {
                       );
                     })
                   )}
+                </select>
+              )}
+            </div>
+          )}
+
+          {/* Persona Selection Section */}
+          {showPersonaSelection && (
+            <div className="header-persona-section">
+              <label className="header-label">Persona</label>
+              {isLoadingPersonas ? (
+                <div className="header-loading">Loading personas...</div>
+              ) : (
+                <select
+                  value={selectedPersona?.id || ''}
+                  onChange={onPersonaChange}
+                  className="header-select"
+                >
+                  <option value="">No Persona (Default)</option>
+                  {personas.map(persona => (
+                    <option key={persona.id} value={persona.id}>
+                      {persona.name}
+                    </option>
+                  ))}
                 </select>
               )}
             </div>

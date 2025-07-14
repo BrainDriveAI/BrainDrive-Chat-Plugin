@@ -16,6 +16,23 @@ export interface ModelInfo {
   serverId: string;
 }
 
+// Persona information
+export interface PersonaInfo {
+  id: string;
+  name: string;
+  description?: string;
+  system_prompt: string;
+  model_settings?: {
+    temperature?: number;
+    top_p?: number;
+    max_tokens?: number;
+    // Additional model settings can be added here
+  };
+  avatar?: string;
+  tags?: string[];
+  sample_greeting?: string;
+}
+
 // Conversation information
 export interface ConversationInfo {
   id: string;
@@ -23,9 +40,15 @@ export interface ConversationInfo {
   user_id: string;
   model?: string;
   server?: string;
+  persona_id?: string;  // NEW: ID of the persona used in this conversation
   conversation_type: string;
   created_at: string;
   updated_at?: string;
+}
+
+// Conversation with full persona details
+export interface ConversationWithPersona extends ConversationInfo {
+  persona?: PersonaInfo;  // NEW: full persona details
 }
 
 // Dropdown option for conversations
@@ -105,6 +128,10 @@ export interface BrainDriveChatProps {
   defaultStreamingMode?: boolean;
   promptQuestion?: string;
   conversationType?: string; // Allow plugins to specify their type
+  // Persona-related props
+  availablePersonas?: PersonaInfo[];  // Developer-defined personas
+  showPersonaSelection?: boolean;     // Control visibility
+  defaultPersona?: PersonaInfo;       // Default persona to use
 }
 
 // Component state
@@ -127,6 +154,11 @@ export interface BrainDriveChatState {
   isLoadingModels: boolean;
   showModelSelection: boolean;
   showConversationHistory: boolean;
+  // Persona-related state
+  personas: PersonaInfo[];
+  selectedPersona: PersonaInfo | null;
+  isLoadingPersonas: boolean;
+  showPersonaSelection: boolean;
 }
 
 // Provider settings

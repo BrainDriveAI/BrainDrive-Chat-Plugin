@@ -1,4 +1,4 @@
-import { ModelInfo, Services, ChatMessage } from '../types';
+import { ModelInfo, Services, ChatMessage, PersonaInfo } from '../types';
 import { extractTextFromData, generateId } from '../utils';
 
 export class AIService {
@@ -37,7 +37,8 @@ export class AIService {
     conversationType: string = "chat", // New parameter
     onChunk: (chunk: string) => void,
     onConversationId: (id: string) => void,
-    pageContext?: any // New parameter for page context
+    pageContext?: any, // New parameter for page context
+    selectedPersona?: PersonaInfo  // Add persona parameter
   ): Promise<boolean> {
     if (!this.services?.api) {
       throw new Error('API service not available');
@@ -79,6 +80,22 @@ export class AIService {
         pageRoute: pageContext.pageRoute,
         isStudioPage: pageContext.isStudioPage
       });
+    }
+
+    // Add persona data if available
+    if (selectedPersona) {
+      requestParams.persona_id = selectedPersona.id;
+      requestParams.persona_system_prompt = selectedPersona.system_prompt;
+      requestParams.persona_model_settings = selectedPersona.model_settings;
+      requestParams.persona_sample_greeting = selectedPersona.sample_greeting;
+
+      // Apply persona model settings to params if available
+      if (selectedPersona.model_settings) {
+        requestParams.params = {
+          ...requestParams.params,
+          ...selectedPersona.model_settings
+        };
+      }
     }
 
     try {
@@ -164,5 +181,43 @@ export class AIService {
    */
   getCurrentUserId(): string | null {
     return this.currentUserId;
+  }
+
+  /**
+   * Load conversation with persona details
+   */
+  async loadConversationWithPersona(conversationId: string): Promise<any> {
+    if (!this.services?.api) {
+      throw new Error('API service not available');
+    }
+
+    try {
+      const response = await this.services.api.get(
+        `/api/v1/conversations/${conversationId}/with-persona`
+      );
+      return response;
+    } catch (error) {
+      console.error('Error loading conversation with persona:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update conversation's persona
+   */
+  async updateConversationPersona(conversationId: string, personaId: string | null): Promise<void> {
+    if (!this.services?.api) {
+      throw new Error('API service not available');
+    }
+
+    try {
+      await this.services.api.put(
+        `/api/v1/conversations/${conversationId}/persona`,
+        { persona_id: personaId }
+      );
+    } catch (error) {
+      console.error('Error updating conversation persona:', error);
+      throw error;
+    }
   }
 }
