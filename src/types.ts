@@ -5,6 +5,51 @@ export interface ChatMessage {
   content: string;
   timestamp: string;
   isStreaming?: boolean;
+  // Search results
+  isSearchResults?: boolean;
+  searchData?: {
+    query: string;
+    results: SearchResult[];
+    scrapedContent?: any;
+    totalResults: number;
+    successfulScrapes?: number;
+  };
+  // User control features
+  isEditable?: boolean;
+  isEdited?: boolean;
+  originalContent?: string;
+  canContinue?: boolean;
+  canRegenerate?: boolean;
+  isCutOff?: boolean;
+  
+  // Document context
+  isDocumentContext?: boolean;
+  documentData?: {
+    results: DocumentProcessingResult[];
+    context: string;
+  };
+  // Markdown toggle
+  showRawMarkdown?: boolean;
+  
+  // Web search context (for user messages)
+  hasSearchContext?: boolean;
+  searchContextData?: {
+    originalPrompt: string;
+    searchQuery: string;
+    searchResults: SearchResult[];
+    scrapedContent?: any;
+    totalResults: number;
+    successfulScrapes?: number;
+  };
+}
+
+// Interface for web search
+export interface SearchResult {
+  title: string;
+  url: string;
+  content: string;
+  engine?: string;
+  score?: number;
 }
 
 // Model information
@@ -40,7 +85,7 @@ export interface ConversationInfo {
   user_id: string;
   model?: string;
   server?: string;
-  persona_id?: string;  // NEW: ID of the persona used in this conversation
+  persona_id?: string;
   conversation_type: string;
   created_at: string;
   updated_at?: string;
@@ -48,7 +93,7 @@ export interface ConversationInfo {
 
 // Conversation with full persona details
 export interface ConversationWithPersona extends ConversationInfo {
-  persona?: PersonaInfo;  // NEW: full persona details
+  persona?: PersonaInfo;
 }
 
 // Dropdown option for conversations
@@ -70,6 +115,31 @@ export interface ApiResponse {
   status?: number;
   id?: string;
   [key: string]: any;
+}
+
+// Document processing interfaces
+export interface DocumentProcessingResult {
+  filename: string;
+  file_type: string;
+  content_type: string;
+  file_size: number;
+  extracted_text: string;
+  text_length: number;
+  processing_success: boolean;
+  error?: string;
+}
+
+export interface MultipleDocumentProcessingResult {
+  results: DocumentProcessingResult[];
+  total_files: number;
+  successful_files: number;
+  failed_files: number;
+}
+
+export interface SupportedFileTypes {
+  supported_types: Record<string, string>;
+  max_file_size_mb: number;
+  max_files_per_request: number;
 }
 
 // Service interfaces
@@ -159,6 +229,31 @@ export interface BrainDriveChatState {
   selectedPersona: PersonaInfo | null;
   isLoadingPersonas: boolean;
   showPersonaSelection: boolean;
+  // Web search state
+  useWebSearch: boolean;
+  isSearching: boolean;
+  // User control state
+  isStreaming: boolean;
+  editingMessageId: string | null;
+  editingContent: string;
+  
+  // Document processing state
+  documentContext: string;
+  isProcessingDocuments: boolean;
+  
+  // Scroll state
+  isNearBottom: boolean;
+  showScrollToBottom: boolean;
+  
+  // History UI state
+  showAllHistory: boolean;
+  openConversationMenu: string | null;
+  menuPosition?: { top: number; left: number };
+  isHistoryExpanded: boolean;
+  
+  // Resize state
+  chatHistoryHeight?: number;
+  isResizing: boolean;
 }
 
 // Provider settings

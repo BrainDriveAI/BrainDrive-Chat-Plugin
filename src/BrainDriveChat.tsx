@@ -6,12 +6,22 @@ import {
   ChatMessage,
   ModelInfo,
   PersonaInfo,
-  ConversationWithPersona
+  ConversationWithPersona,
+  DocumentProcessingResult
 } from './types';
 import {
   generateId,
-  debounce
+  debounce,
 } from './utils';
+
+// Import constants
+import {
+  SETTINGS_KEYS,
+  UI_CONFIG,
+  API_CONFIG,
+  ERROR_MESSAGES,
+  SUCCESS_MESSAGES
+} from './constants';
 
 // Import modular components
 import {
@@ -21,11 +31,18 @@ import {
   LoadingStates
 } from './components';
 
-// Note: Using class-based approach for plugin compatibility
-// Hooks are available as separate modules for future functional components
-
 // Import services
-import { AIService } from './services';
+import { AIService, SearchService, DocumentService } from './services';
+
+// Import icons
+import {
+  PlusIcon,
+  ThreeDotsIcon,
+  ShareIcon,
+  EditIcon,
+  DeleteIcon,
+  ChevronDownIcon
+} from './icons';
 
 /**
  * Unified BrainDriveChat component that combines AI chat, model selection, and conversation history
@@ -36,10 +53,14 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   private themeChangeListener: ((theme: string) => void) | null = null;
   private pageContextUnsubscribe: (() => void) | null = null;
   private currentPageContext: any = null;
-  private readonly STREAMING_SETTING_KEY = 'ai_prompt_chat_streaming_enabled';
+  private readonly STREAMING_SETTING_KEY = SETTINGS_KEYS.STREAMING;
   private initialGreetingAdded = false;
   private debouncedScrollToBottom: () => void;
   private aiService: AIService | null = null;
+  private searchService: SearchService | null = null;
+  private documentService: DocumentService | null = null;
+  private currentStreamingAbortController: AbortController | null = null;
+  private menuButtonRef: HTMLButtonElement | null = null;
 
   constructor(props: BrainDriveChatProps) {
     super(props);
@@ -52,9 +73,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       error: '',
       currentTheme: 'light',
       selectedModel: null,
-      useStreaming: props.defaultStreamingMode !== undefined
-        ? !!props.defaultStreamingMode
-        : true,
+      useStreaming: true, // Always use streaming
       conversation_id: null,
       isLoadingHistory: false,
       currentUserId: null,
@@ -75,30 +94,77 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       
       // Persona state
       personas: props.availablePersonas || [],
-      selectedPersona: props.defaultPersona || null,
+      selectedPersona: null, // Default to no persona
       isLoadingPersonas: !props.availablePersonas,
-      showPersonaSelection: props.showPersonaSelection !== false
+      showPersonaSelection: props.showPersonaSelection !== false,
+      
+      // Web search state
+      useWebSearch: false,
+      isSearching: false,
+      
+      // User control state
+      isStreaming: false,
+      editingMessageId: null,
+      editingContent: '',
+      
+      // Document processing state
+      documentContext: '',
+      isProcessingDocuments: false,
+      
+      // Scroll state
+      isNearBottom: true,
+      showScrollToBottom: false,
+      
+      // History UI state
+      showAllHistory: false,
+      openConversationMenu: null,
+      isHistoryExpanded: true, // History accordion state
+      
+      // Resize state
+      chatHistoryHeight: undefined,
+      isResizing: false
     };
     
     // Bind methods
-    this.debouncedScrollToBottom = debounce(this.scrollToBottom.bind(this), 100);
+    this.debouncedScrollToBottom = debounce(this.scrollToBottom.bind(this), UI_CONFIG.SCROLL_DEBOUNCE_DELAY);
     
     // Initialize AI service
     this.aiService = new AIService(props.services);
+    
+    // Initialize Search service with authenticated API service
+    this.searchService = new SearchService(props.services.api);
+    
+    // Initialize Document service with authenticated API service
+    this.documentService = new DocumentService(props.services.api);
   }
 
   componentDidMount() {
+    console.log(`🎭 ComponentDidMount - Initial persona state: selectedPersona=${this.state.selectedPersona?.name || 'null'}, showPersonaSelection=${this.state.showPersonaSelection}, availablePersonas=${this.props.availablePersonas?.length || 0}`);
+    
     this.initializeThemeService();
     this.initializePageContextService();
     this.loadInitialData();
     this.loadSavedStreamingMode();
     this.loadPersonas();
     
+    // Add global key event listener for ESC key
+    document.addEventListener('keydown', this.handleGlobalKeyPress);
+    
+    // Add scroll event listener to track scroll position
+    if (this.chatHistoryRef.current) {
+      this.chatHistoryRef.current.addEventListener('scroll', this.handleScroll);
+    }
+    
     // Set initialization timeout
     setTimeout(() => {
       if (!this.state.conversation_id) {
-        // Prioritize persona sample greeting over default initial greeting
-        const greetingContent = this.state.selectedPersona?.sample_greeting || this.props.initialGreeting;
+        // Only use persona greeting if persona selection is enabled and a persona is selected
+        // Ensure persona is null when personas are disabled
+        const effectivePersona = this.state.showPersonaSelection ? this.state.selectedPersona : null;
+        const personaGreeting = this.state.showPersonaSelection && effectivePersona?.sample_greeting;
+        const greetingContent = personaGreeting || this.props.initialGreeting;
+        
+        console.log(`🎭 Greeting logic: showPersonaSelection=${this.state.showPersonaSelection}, effectivePersona=${effectivePersona?.name || 'none'}, using=${personaGreeting ? 'persona' : 'default'} greeting`);
         
         if (greetingContent && !this.initialGreetingAdded) {
           this.initialGreetingAdded = true;
@@ -118,7 +184,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
           this.setState({ isInitializing: false });
         }
       }
-    }, 2000);
+    }, UI_CONFIG.INITIAL_GREETING_DELAY);
   }
 
   componentDidUpdate(prevProps: BrainDriveChatProps, prevState: BrainDriveChatState) {
@@ -137,6 +203,19 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     // Clean up page context subscription
     if (this.pageContextUnsubscribe) {
       this.pageContextUnsubscribe();
+    }
+    
+    // Clean up global key event listener
+    document.removeEventListener('keydown', this.handleGlobalKeyPress);
+    
+    // Clean up scroll event listener
+    if (this.chatHistoryRef.current) {
+      this.chatHistoryRef.current.removeEventListener('scroll', this.handleScroll);
+    }
+    
+    // Clean up any ongoing streaming
+    if (this.currentStreamingAbortController) {
+      this.currentStreamingAbortController.abort();
     }
   }
 
@@ -215,21 +294,50 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     }
   }
 
+
+
   /**
-   * Toggle streaming mode
+   * Toggle web search mode and test connection
    */
-  toggleStreamingMode = async () => {
-    const newStreamingMode = !this.state.useStreaming;
-    this.setState({ useStreaming: newStreamingMode });
-    await this.saveStreamingMode(newStreamingMode);
+  toggleWebSearchMode = async () => {
+    const newWebSearchMode = !this.state.useWebSearch;
+    this.setState({ useWebSearch: newWebSearchMode });
     
-    // Add a message to the chat history indicating the mode change
-    this.addMessageToChat({
-      id: generateId('streaming-mode'),
-      sender: 'ai',
-      content: `Streaming mode ${newStreamingMode ? 'enabled' : 'disabled'}`,
-      timestamp: new Date().toISOString()
-    });
+    // Test connection when enabling web search
+    if (newWebSearchMode && this.searchService) {
+      try {
+        const healthCheck = await this.searchService.checkHealth();
+        if (!healthCheck.accessible) {
+          this.addMessageToChat({
+            id: generateId('search-warning'),
+            sender: 'ai',
+            content: `⚠️ Web search enabled but the search service is not accessible. ${healthCheck.error || 'Please ensure SearXNG is running and the backend is connected.'}`,
+            timestamp: new Date().toISOString()
+          });
+        } else {
+          this.addMessageToChat({
+            id: generateId('search-enabled'),
+            sender: 'ai',
+            content: '🔍 Web search enabled - I can now search the web to help answer your questions',
+            timestamp: new Date().toISOString()
+          });
+        }
+      } catch (error) {
+        this.addMessageToChat({
+          id: generateId('search-error'),
+          sender: 'ai',
+          content: '❌ Web search enabled but there was an error connecting to the search service',
+          timestamp: new Date().toISOString()
+        });
+      }
+    } else {
+      this.addMessageToChat({
+        id: generateId('search-disabled'),
+        sender: 'ai',
+        content: `🔍 Web search ${newWebSearchMode ? 'enabled' : 'disabled'}`,
+        timestamp: new Date().toISOString()
+      });
+    }
   };
 
   /**
@@ -293,18 +401,23 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
    * Load personas from API or use provided personas
    */
   loadPersonas = async () => {
-    if (this.props.availablePersonas) {
-      // Use provided personas
-      return;
-    }
+    console.log(`🎭 Loading personas - availablePersonas: ${this.props.availablePersonas?.length || 0}, showPersonaSelection: ${this.state.showPersonaSelection}`);
+    
+          if (this.props.availablePersonas) {
+        // Use provided personas
+        console.log(`🎭 Using provided personas: ${this.props.availablePersonas.map((p: any) => p.name).join(', ')}`);
+        return;
+      }
     
     this.setState({ isLoadingPersonas: true });
     
     try {
       if (this.props.services?.api) {
         const response = await this.props.services.api.get('/api/v1/personas');
+        const personas = response.personas || [];
+        console.log(`🎭 Loaded personas from API: ${personas.map((p: any) => p.name).join(', ')}`);
         this.setState({
-          personas: response.personas || [],
+          personas: personas,
           isLoadingPersonas: false
         });
       } else {
@@ -439,6 +552,106 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   };
 
   /**
+   * Refresh conversations list without interfering with current conversation
+   */
+  refreshConversationsList = async () => {
+    if (!this.props.services?.api) {
+      return;
+    }
+    
+    try {
+      // First, get the current user's information to get their ID
+      const userResponse = await this.props.services.api.get('/api/v1/auth/me');
+      
+      // Extract the user ID from the response
+      let userId = userResponse.id;
+      
+      if (!userId) {
+        return;
+      }
+      
+      // Get current page context for page-specific conversations
+      const pageContext = this.getCurrentPageContext();
+      const params: any = {
+        skip: 0,
+        limit: 50,
+        conversation_type: this.props.conversationType || "chat"
+      };
+      
+      // Add page_id if available for page-specific conversations
+      if (pageContext?.pageId) {
+        params.page_id = pageContext.pageId;
+      }
+      
+      const response = await this.props.services.api.get(
+        `/api/v1/users/${userId}/conversations`,
+        { params }
+      );
+      
+      let conversations = [];
+      
+      if (Array.isArray(response)) {
+        conversations = response;
+      } else if (response && response.data && Array.isArray(response.data)) {
+        conversations = response.data;
+      } else if (response) {
+        try {
+          if (typeof response === 'object') {
+            if (response.id && response.user_id) {
+              conversations = [response];
+            }
+          }
+        } catch (parseError) {
+          // Error parsing response
+        }
+      }
+      
+      if (conversations.length === 0) {
+        this.setState({
+          conversations: [],
+          isLoadingHistory: false
+        });
+        return;
+      }
+      
+      // Validate conversation objects
+      const validConversations = conversations.filter((conv: any) => {
+        return conv && typeof conv === 'object' && conv.id && conv.user_id;
+      });
+      
+      // Sort conversations by most recently updated or created
+      validConversations.sort((a: any, b: any) => {
+        if (a.updated_at && b.updated_at) {
+          return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+        }
+        
+        if (a.updated_at && !b.updated_at) {
+          return -1;
+        }
+        
+        if (!a.updated_at && b.updated_at) {
+          return 1;
+        }
+        
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
+      
+      // Update conversations list and select current conversation if it exists
+      const currentConversation = this.state.conversation_id 
+        ? validConversations.find(conv => conv.id === this.state.conversation_id)
+        : null;
+      
+      this.setState({
+        conversations: validConversations,
+        selectedConversation: currentConversation || this.state.selectedConversation
+      });
+      
+    } catch (error: any) {
+      console.error('Error refreshing conversations list:', error);
+    }
+  };
+
+  /**
    * Fetch conversations from the API
    */
   fetchConversations = async () => {
@@ -545,8 +758,9 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         selectedConversation: mostRecentConversation,
         isLoadingHistory: false
       }, () => {
-        // Load the most recent conversation if available with persona and model restoration
-        if (mostRecentConversation) {
+        // Only auto-load the most recent conversation if we don't have an active conversation
+        // This prevents interference with ongoing message exchanges
+        if (mostRecentConversation && !this.state.conversation_id) {
           this.loadConversationWithPersona(mostRecentConversation.id);
         }
       });
@@ -625,6 +839,8 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   handleConversationSelect = (event: React.ChangeEvent<HTMLSelectElement>) => {
     const conversationId = event.target.value;
     
+    console.log(`📋 Conversation selected: ${conversationId || 'new chat'}`);
+    
     if (!conversationId) {
       // New chat selected
       this.handleNewChatClick();
@@ -636,6 +852,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     );
     
     if (selectedConversation) {
+      console.log(`📂 Loading conversation: ${conversationId}`);
       this.setState({ selectedConversation }, () => {
         // Use the new persona-aware conversation loading method
         this.loadConversationWithPersona(conversationId);
@@ -652,7 +869,11 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       ? this.state.personas.find(p => p.id === personaId) || null
       : null;
     
-    this.setState({ selectedPersona });
+    console.log(`🎭 Persona changed: ${selectedPersona?.name || 'none'} (ID: ${personaId || 'none'})`);
+    
+    this.setState({ selectedPersona }, () => {
+      console.log(`🎭 Persona state after change: selectedPersona=${this.state.selectedPersona?.name || 'null'}, showPersonaSelection=${this.state.showPersonaSelection}`);
+    });
 
     // If we have an active conversation, update its persona
     if (this.state.conversation_id) {
@@ -666,16 +887,34 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   };
 
   /**
+   * Handle persona toggle (when turning personas on/off)
+   */
+  handlePersonaToggle = () => {
+    // Reset to no persona when toggling off
+    console.log('🎭 Persona toggled off - resetting to no persona');
+    this.setState({ selectedPersona: null }, () => {
+      console.log(`🎭 Persona state after toggle: selectedPersona=${this.state.selectedPersona?.name || 'null'}, showPersonaSelection=${this.state.showPersonaSelection}`);
+    });
+  };
+
+  /**
    * Handle new chat button click
    */
   handleNewChatClick = () => {
+    console.log(`🆕 Starting new chat - clearing conversation_id`);
     this.setState({
       selectedConversation: null,
       conversation_id: null,
-      messages: []
+      messages: [],
+      // Reset persona to null when starting new chat (respects persona toggle state)
+      selectedPersona: this.state.showPersonaSelection ? this.state.selectedPersona : null
     }, () => {
-      // Prioritize persona sample greeting over default initial greeting
-      const greetingContent = this.state.selectedPersona?.sample_greeting || this.props.initialGreeting;
+      console.log(`✅ New chat started - conversation_id: ${this.state.conversation_id}`);
+      // Only use persona greeting if persona selection is enabled and a persona is selected
+      const personaGreeting = this.state.showPersonaSelection && this.state.selectedPersona?.sample_greeting;
+      const greetingContent = personaGreeting || this.props.initialGreeting;
+      
+      console.log(`🎭 New chat greeting: showPersonaSelection=${this.state.showPersonaSelection}, selectedPersona=${this.state.selectedPersona?.name || 'none'}, using=${personaGreeting ? 'persona' : 'default'} greeting`);
       
       if (greetingContent) {
         this.initialGreetingAdded = true;
@@ -692,7 +931,17 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   /**
    * Handle renaming a conversation
    */
-  handleRenameConversation = async (conversationId: string, newTitle: string) => {
+  handleRenameConversation = async (conversationId: string, newTitle?: string) => {
+    // Close menu first
+    this.setState({ openConversationMenu: null });
+    
+    if (!newTitle) {
+      const conversation = this.state.conversations.find(c => c.id === conversationId);
+      const promptResult = prompt('Enter new name:', conversation?.title || 'Untitled');
+      if (!promptResult) return; // User cancelled
+      newTitle = promptResult;
+    }
+    
     if (!this.props.services?.api) {
       throw new Error('API service not available');
     }
@@ -727,9 +976,74 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   };
 
   /**
+   * Toggle conversation menu
+   */
+  toggleConversationMenu = (conversationId: string, event?: React.MouseEvent<HTMLButtonElement>) => {
+    const isOpening = this.state.openConversationMenu !== conversationId;
+    
+    if (isOpening && event) {
+      const button = event.currentTarget;
+      const rect = button.getBoundingClientRect();
+      const menuHeight = 200; // Approximate menu height
+      
+      // Calculate position - show above button if there's not enough space below
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const shouldShowAbove = spaceBelow < menuHeight;
+      
+      const top = shouldShowAbove 
+        ? rect.top - menuHeight - 8
+        : rect.bottom + 8;
+      
+      const left = Math.max(8, rect.right - 200); // 200px menu width, 8px margin from edge
+      
+      this.setState({
+        openConversationMenu: conversationId,
+        menuPosition: { top, left }
+      });
+    } else {
+      this.setState({
+        openConversationMenu: null,
+        menuPosition: undefined
+      });
+    }
+  };
+
+  /**
+   * Handle sharing a conversation
+   */
+  handleShareConversation = async (conversationId: string) => {
+    // Close menu
+    this.setState({ openConversationMenu: null });
+    
+    // For now, just copy the conversation URL to clipboard
+    try {
+      const url = `${window.location.origin}${window.location.pathname}?conversation=${conversationId}`;
+      await navigator.clipboard.writeText(url);
+      
+      // Show a temporary success message
+      this.addMessageToChat({
+        id: generateId('share-success'),
+        sender: 'ai',
+        content: '📋 Conversation link copied to clipboard!',
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      this.addMessageToChat({
+        id: generateId('share-error'),
+        sender: 'ai',
+        content: '❌ Failed to copy conversation link',
+        timestamp: new Date().toISOString()
+      });
+    }
+  };
+
+  /**
    * Handle deleting a conversation
    */
   handleDeleteConversation = async (conversationId: string) => {
+    // Close menu first
+    this.setState({ openConversationMenu: null });
+    
     if (!this.props.services?.api) {
       throw new Error('API service not available');
     }
@@ -750,12 +1064,18 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
           conversations: updatedConversations,
           selectedConversation: wasSelected ? null : prevState.selectedConversation,
           conversation_id: wasSelected ? null : prevState.conversation_id,
-          messages: wasSelected ? [] : prevState.messages
+          messages: wasSelected ? [] : prevState.messages,
+          // Reset persona to null when starting new chat (respects persona toggle state)
+          selectedPersona: wasSelected ? (prevState.showPersonaSelection ? prevState.selectedPersona : null) : prevState.selectedPersona
         };
       }, () => {
-        // If we deleted the selected conversation, add greeting if available (prioritize persona greeting)
+        // If we deleted the selected conversation, add greeting if available
         if (this.state.selectedConversation === null) {
-          const greetingContent = this.state.selectedPersona?.sample_greeting || this.props.initialGreeting;
+          // Only use persona greeting if persona selection is enabled and a persona is selected
+          // Ensure persona is null when personas are disabled
+          const effectivePersona = this.state.showPersonaSelection ? this.state.selectedPersona : null;
+          const greetingContent = (this.state.showPersonaSelection && effectivePersona?.sample_greeting) 
+            || this.props.initialGreeting;
           
           if (greetingContent) {
             this.initialGreetingAdded = true;
@@ -778,6 +1098,8 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
    * Load conversation history from the API
    */
   loadConversationHistory = async (conversationId: string) => {
+    console.log(`📚 Loading conversation history: ${conversationId}`);
+    
     if (!this.props.services?.api) {
       this.setState({ error: 'API service not available', isInitializing: false });
       return;
@@ -785,6 +1107,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     
     try {
       // Clear current conversation without showing initial greeting
+      console.log(`🧹 Clearing messages for conversation load: ${conversationId}`);
       this.setState({
         messages: [],
         conversation_id: null,
@@ -808,7 +1131,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         messages.push(...response.messages.map((msg: any) => ({
           id: msg.id || generateId('history'),
           sender: msg.sender === 'llm' ? 'ai' : 'user' as 'ai' | 'user',
-          content: msg.message,
+          content: this.cleanMessageContent(msg.message),
           timestamp: msg.created_at
         })));
       }
@@ -820,6 +1143,8 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         isLoadingHistory: false,
         isInitializing: false
       });
+      
+      console.log(`✅ Conversation history loaded: ${conversationId}, ${messages.length} messages`);
       
       // Scroll to bottom after loading history
       setTimeout(() => this.scrollToBottom(), 100);
@@ -838,6 +1163,8 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
    * Load conversation history with persona and model auto-selection
    */
   loadConversationWithPersona = async (conversationId: string) => {
+    console.log(`🔄 Loading conversation with persona: ${conversationId}`);
+    
     if (!this.props.services?.api || !this.aiService) {
       this.setState({ error: 'API service not available', isInitializing: false });
       return;
@@ -866,8 +1193,8 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         conversationWithPersona = selectedConversation;
       }
       
-      // Restore persona selection
-      if (conversationWithPersona?.persona) {
+      // Restore persona selection only if personas are enabled
+      if (this.state.showPersonaSelection && conversationWithPersona?.persona) {
         const persona = conversationWithPersona.persona;
         // Check if this persona exists in our current personas list
         const existingPersona = this.state.personas.find(p => p.id === persona.id);
@@ -880,12 +1207,15 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
             selectedPersona: persona
           }));
         }
-      } else if (conversationWithPersona?.persona_id) {
+      } else if (this.state.showPersonaSelection && conversationWithPersona?.persona_id) {
         // If we have a persona_id but no full persona data, try to find it in our list
         const existingPersona = this.state.personas.find(p => p.id === conversationWithPersona.persona_id);
         if (existingPersona) {
           this.setState({ selectedPersona: existingPersona });
         }
+      } else {
+        // Ensure persona is reset to null when personas are disabled
+        this.setState({ selectedPersona: null });
       }
       
       // Restore model selection from conversation data
@@ -915,6 +1245,8 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       // Now load the conversation messages using the regular method
       await this.loadConversationHistory(conversationId);
       
+      console.log(`✅ Conversation loaded successfully: ${conversationId}`);
+      
     } catch (error) {
       console.error('Error loading conversation with persona:', error);
       // Fall back to regular conversation loading
@@ -939,13 +1271,451 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   };
 
   /**
+   * Stop ongoing generation
+   */
+  stopGeneration = async () => {
+    console.log('🛑 stopGeneration called');
+    
+    // Abort the frontend request immediately
+    if (this.currentStreamingAbortController) {
+      this.currentStreamingAbortController.abort();
+      this.currentStreamingAbortController = null;
+    }
+    
+    // Try to cancel backend generation (best effort)
+    if (this.aiService && this.state.conversation_id) {
+      try {
+        await this.aiService.cancelGeneration(this.state.conversation_id);
+      } catch (error) {
+        console.error('Error canceling backend generation:', error);
+        // Continue anyway - the AbortController should handle the cancellation
+      }
+    }
+    
+    // Immediately update UI state - keep the partial response but mark it as stopped
+    this.setState(prevState => {
+      console.log('🛑 Updating message states, current messages:', prevState.messages.length);
+      
+      const updatedMessages = prevState.messages.map(message => {
+        const shouldUpdate = message.isStreaming;
+        if (shouldUpdate) {
+          console.log(`🛑 Updating streaming message ${message.id} with canContinue: true, isCutOff: true`);
+        }
+        
+        return {
+          ...message,
+          isStreaming: false,
+          canRegenerate: true,
+          // Only set canContinue and isCutOff for messages that are currently streaming
+          canContinue: shouldUpdate ? true : message.canContinue,
+          isCutOff: shouldUpdate ? true : message.isCutOff
+        };
+      });
+      
+      return {
+        isStreaming: false,
+        isLoading: false,
+        messages: updatedMessages
+      };
+    }, () => {
+      console.log('🛑 Message states updated, focusing input');
+      // Focus the input after stopping
+      this.focusInput();
+    });
+  };
+
+  /**
+   * Continue generation from where it left off
+   */
+  continueGeneration = async () => {
+    const lastAiMessage = this.state.messages
+      .filter(msg => msg.sender === 'ai')
+      .pop();
+    
+    if (lastAiMessage && lastAiMessage.canContinue) {
+      // Send a "continue" prompt to the AI
+      await this.sendPromptToAI('continue');
+    }
+  };
+
+  /**
+   * Regenerate the last AI response
+   */
+  regenerateResponse = async () => {
+    const lastUserMessage = this.state.messages
+      .filter(msg => msg.sender === 'user')
+      .pop();
+    
+    if (lastUserMessage) {
+      // Remove the last AI response (all messages after the last user message)
+      this.setState(prevState => {
+        const lastUserIndex = prevState.messages.findIndex(msg => msg.id === lastUserMessage.id);
+        return {
+          messages: prevState.messages.slice(0, lastUserIndex + 1)
+        };
+      }, () => {
+        // Regenerate the response
+        this.sendPromptToAI(lastUserMessage.content);
+      });
+    }
+  };
+
+  /**
+   * Start editing a user message
+   */
+  startEditingMessage = (messageId: string, content: string) => {
+    this.setState({
+      editingMessageId: messageId,
+      editingContent: content
+    });
+  };
+
+  /**
+   * Cancel editing a message
+   */
+  cancelEditingMessage = () => {
+    this.setState({
+      editingMessageId: null,
+      editingContent: ''
+    });
+  };
+
+  /**
+   * Toggle markdown view for a message
+   */
+  toggleMarkdownView = (messageId: string) => {
+    this.setState(prevState => ({
+      messages: prevState.messages.map(message => {
+        if (message.id === messageId) {
+          return {
+            ...message,
+            showRawMarkdown: !message.showRawMarkdown
+          };
+        }
+        return message;
+      })
+    }));
+  };
+
+  /**
+   * Save edited message and regenerate response
+   */
+  saveEditedMessage = async () => {
+    const { editingMessageId, editingContent } = this.state;
+    
+    if (!editingMessageId || !editingContent.trim()) {
+      return;
+    }
+
+    // Update the message content
+    this.setState(prevState => ({
+      messages: prevState.messages.map(message => {
+        if (message.id === editingMessageId) {
+          return {
+            ...message,
+            content: editingContent.trim(),
+            isEdited: true,
+            originalContent: message.originalContent || message.content
+          };
+        }
+        return message;
+      }),
+      editingMessageId: null,
+      editingContent: ''
+    }), async () => {
+      // Find the edited message and regenerate the response
+      const editedMessage = this.state.messages.find(msg => msg.id === editingMessageId);
+      if (editedMessage) {
+        // Remove all messages after the edited message
+        this.setState(prevState => ({
+          messages: prevState.messages.slice(0, prevState.messages.findIndex(msg => msg.id === editingMessageId) + 1)
+        }), () => {
+          // Regenerate the response
+          this.sendPromptToAI(editedMessage.content);
+        });
+      }
+    });
+  };
+
+  /**
+   * Handle file upload button click
+   */
+  handleFileUploadClick = () => {
+    // Create a hidden file input and trigger it
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.multiple = true;
+    fileInput.accept = '.pdf,.txt,.csv,.json,.xlsx,.xls,.md,.xml,.html';
+    fileInput.style.display = 'none';
+    
+    fileInput.onchange = async (event) => {
+      const files = (event.target as HTMLInputElement).files;
+      if (!files || files.length === 0) return;
+
+      if (!this.documentService) {
+        this.setState({ error: 'Document service not available' });
+        return;
+      }
+
+      this.setState({ isProcessingDocuments: true });
+
+      try {
+        const fileArray = Array.from(files);
+        const results: DocumentProcessingResult[] = [];
+
+        // Process each file
+        for (const file of fileArray) {
+          try {
+            // Validate file
+            const validation = await this.documentService.validateFile(file);
+            if (!validation.valid) {
+              this.setState({ error: `File ${file.name}: ${validation.error}` });
+              continue;
+            }
+
+            // Process file
+            const result = await this.documentService.processDocument(file);
+            if (result.processing_success) {
+              results.push(result);
+            } else {
+              this.setState({ error: `Failed to process ${file.name}: ${result.error}` });
+            }
+          } catch (error) {
+            this.setState({ error: `Error processing ${file.name}: ${error instanceof Error ? error.message : 'Unknown error'}` });
+          }
+        }
+
+        if (results.length > 0) {
+          this.handleDocumentsProcessed(results);
+        }
+      } catch (error) {
+        this.setState({ error: `Error processing documents: ${error instanceof Error ? error.message : 'Unknown error'}` });
+      } finally {
+        this.setState({ isProcessingDocuments: false });
+      }
+    };
+
+    document.body.appendChild(fileInput);
+    fileInput.click();
+    document.body.removeChild(fileInput);
+  };
+
+  /**
+   * Handle document processing
+   */
+  handleDocumentsProcessed = (results: DocumentProcessingResult[]) => {
+    if (results.length === 0) return;
+
+    // Format document context for chat
+    let documentContext = '';
+    if (results.length === 1) {
+      documentContext = this.documentService!.formatTextForChatContext(results[0]);
+    } else {
+      documentContext = this.documentService!.formatMultipleTextsForChatContext(results);
+    }
+
+    // Add document context to state
+    this.setState({ documentContext }, () => {
+      // Add a message to show the documents were processed
+      const documentMessage: ChatMessage = {
+        id: generateId('documents'),
+        sender: 'ai',
+        content: '',
+        timestamp: new Date().toISOString(),
+        isDocumentContext: true,
+        documentData: {
+          results,
+          context: documentContext
+        }
+      };
+
+      this.addMessageToChat(documentMessage);
+    });
+  };
+
+  /**
+   * Handle document processing errors
+   */
+  handleDocumentError = (error: string) => {
+    this.setState({ error });
+  };
+
+  /**
+   * Handle key press events for global shortcuts
+   */
+  handleGlobalKeyPress = (e: KeyboardEvent) => {
+    // ESC key to stop generation
+    if (e.key === 'Escape' && this.state.isStreaming) {
+      e.preventDefault();
+      this.stopGeneration();
+    }
+  };
+
+  /**
+   * Toggle history accordion
+   */
+  toggleHistoryAccordion = () => {
+    this.setState(prevState => ({
+      isHistoryExpanded: !prevState.isHistoryExpanded
+    }));
+  };
+
+
+
+  /**
+   * Auto-close accordions on first message
+   */
+  autoCloseAccordionsOnFirstMessage = () => {
+    // Only close if this is the first user message in a new conversation
+    const userMessages = this.state.messages.filter(msg => msg.sender === 'user');
+    if (userMessages.length === 1 && !this.state.conversation_id) {
+      this.setState({
+        isHistoryExpanded: false
+      });
+    }
+  };
+
+  /**
+   * Handle resize start
+   */
+  handleResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    this.setState({ isResizing: true });
+    
+    const startY = e.clientY;
+    const startHeight = this.chatHistoryRef.current?.clientHeight || 400;
+    
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const deltaY = moveEvent.clientY - startY;
+      const newHeight = Math.max(200, Math.min(800, startHeight + deltaY));
+      
+      this.setState({ chatHistoryHeight: newHeight });
+    };
+    
+    const handleMouseUp = () => {
+      this.setState({ isResizing: false });
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+    
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
+
+
+
+  /**
+   * Build comprehensive search context to inject into user prompt
+   */
+  buildSearchContextForPrompt = (searchResponse: any, scrapedContent: any): string => {
+    let context = `Search Results for "${searchResponse.query}":\n\n`;
+    
+    // Add basic search results
+    if (searchResponse.results && searchResponse.results.length > 0) {
+      searchResponse.results.slice(0, 5).forEach((result: any, index: number) => {
+        context += `${index + 1}. ${result.title}\n`;
+        context += `   URL: ${result.url}\n`;
+        if (result.content) {
+          const cleanContent = result.content.replace(/\s+/g, ' ').trim().substring(0, 200);
+          context += `   Summary: ${cleanContent}${result.content.length > 200 ? '...' : ''}\n`;
+        }
+        context += '\n';
+      });
+    }
+
+    // Add detailed scraped content
+    if (scrapedContent && scrapedContent.results && scrapedContent.results.length > 0) {
+      context += '\nDetailed Content from Web Pages:\n\n';
+      
+      scrapedContent.results.forEach((result: any, index: number) => {
+        if (result.success && result.content) {
+          // Find the corresponding search result for title
+          const searchResult = searchResponse.results.find((sr: any) => sr.url === result.url);
+          const title = searchResult?.title || `Content from ${result.url}`;
+          
+          context += `Page ${index + 1}: ${title}\n`;
+          context += `Source: ${result.url}\n`;
+          context += `Full Content: ${result.content}\n\n`;
+        }
+      });
+      
+      context += `(Successfully scraped ${scrapedContent.summary.successful_scrapes} out of ${scrapedContent.summary.total_urls} pages)\n`;
+    }
+
+    context += '\nPlease use this web search and scraped content information to provide an accurate, up-to-date answer to the user\'s question.';
+    
+    return context;
+  };
+
+  /**
+   * Clean up message content by removing excessive newlines and search/document context
+   */
+  cleanMessageContent = (content: string): string => {
+    if (!content) return content;
+    
+    let cleanedContent = content
+      .replace(/\r\n/g, '\n')      // Normalize line endings
+      .replace(/\n{3,}/g, '\n\n')  // Replace 3+ newlines with 2 (paragraph break)
+      .trim();                     // Remove leading/trailing whitespace
+    
+    // Remove web search context that might have been stored in old messages
+    cleanedContent = cleanedContent.replace(/\n\n\[WEB SEARCH CONTEXT[^]*$/, '');
+    
+    // Remove document context that might have been stored in old messages
+    cleanedContent = cleanedContent.replace(/^Document Context:[^]*?\n\nUser Question: /, '');
+    cleanedContent = cleanedContent.replace(/^[^]*?\n\nUser Question: /, '');
+    
+    return cleanedContent.trim();
+  };
+
+  /**
    * Add a new message to the chat history
    */
   addMessageToChat = (message: ChatMessage) => {
+    // Clean up the message content
+    const cleanedMessage = {
+      ...message,
+      content: this.cleanMessageContent(message.content)
+    };
+    
+    console.log(`💬 Adding message to chat: ${cleanedMessage.sender} - ${cleanedMessage.content.substring(0, 50)}...`);
     this.setState(prevState => ({
-      messages: [...prevState.messages, message]
-    }));
+      messages: [...prevState.messages, cleanedMessage]
+    }), () => {
+      console.log(`✅ Message added. Total messages: ${this.state.messages.length}`);
+    });
   }
+
+  /**
+   * Check if user is near the bottom of the chat
+   */
+  isUserNearBottom = () => {
+    if (!this.chatHistoryRef.current) return true;
+    
+    const { scrollTop, scrollHeight, clientHeight } = this.chatHistoryRef.current;
+    const threshold = 100; // pixels from bottom
+    return scrollTop + clientHeight >= scrollHeight - threshold;
+  };
+
+  /**
+   * Update scroll state based on current position
+   */
+  updateScrollState = () => {
+    const isNearBottom = this.isUserNearBottom();
+    const showScrollToBottom = !isNearBottom && this.state.isStreaming;
+    
+    this.setState({
+      isNearBottom,
+      showScrollToBottom
+    });
+  };
+
+  /**
+   * Handle scroll events to track user scroll position
+   */
+  handleScroll = () => {
+    this.updateScrollState();
+  };
 
   /**
    * Scroll the chat history to the bottom
@@ -953,6 +1723,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   scrollToBottom = () => {
     if (this.chatHistoryRef.current) {
       this.chatHistoryRef.current.scrollTop = this.chatHistoryRef.current.scrollHeight;
+      this.updateScrollState();
     }
   }
 
@@ -1003,12 +1774,14 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     // Don't send empty messages
     if (!inputText.trim() || this.state.isLoading) return;
     
-    // Add user message to chat
+    // Add user message to chat (will be updated with search context if web search is enabled)
+    const userMessageId = generateId('user');
     const userMessage: ChatMessage = {
-      id: generateId('user'),
+      id: userMessageId,
       sender: 'user',
       content: inputText.trim(),
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      isEditable: true
     };
     
     this.addMessageToChat(userMessage);
@@ -1022,13 +1795,16 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     }
     
     // Send to AI and get response
-    this.sendPromptToAI(userMessage.content);
+    this.sendPromptToAI(userMessage.content, userMessageId);
+    
+    // Auto-close accordions on first message
+    this.autoCloseAccordionsOnFirstMessage();
   };
 
   /**
    * Send prompt to AI provider and handle response
    */
-  sendPromptToAI = async (prompt: string) => {
+  sendPromptToAI = async (prompt: string, userMessageId?: string) => {
     if (!this.aiService || !this.props.services?.api) {
       this.setState({ error: 'API service not available' });
       return;
@@ -1039,9 +1815,102 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       return;
     }
     
+    console.log(`🚀 Sending prompt to AI with conversation_id: ${this.state.conversation_id || 'null (will create new)'}`);
+    
     try {
-      // Set loading state
-      this.setState({ isLoading: true, error: '' });
+      // Set loading and streaming state
+      this.setState({ isLoading: true, isStreaming: true, error: '' });
+      
+      // Create abort controller for streaming
+      this.currentStreamingAbortController = new AbortController();
+      
+      // Perform web search if enabled
+      let enhancedPrompt = prompt;
+      
+      // Add document context if available (only for AI, not for chat history)
+      if (this.state.documentContext) {
+        enhancedPrompt = `${this.state.documentContext}\n\nUser Question: ${prompt}`;
+      }
+      
+      if (this.state.useWebSearch && this.searchService) {
+        try {
+          this.setState({ isSearching: true });
+          
+          // Add a temporary search indicator message
+          const searchIndicatorId = generateId('search-indicator');
+          this.addMessageToChat({
+            id: searchIndicatorId,
+            sender: 'ai',
+            content: '🔍 Searching the web...',
+            timestamp: new Date().toISOString()
+          });
+          
+          // Perform enhanced search with web scraping
+          const { searchResponse, scrapedContent } = await this.searchService.searchWithScraping(prompt, { 
+            category: 'general',
+            language: 'en'
+          }, 3, 3000); // Scrape top 3 results, max 3000 chars each
+          
+          // Remove the search indicator
+          this.setState(prevState => ({
+            messages: prevState.messages.filter(msg => msg.id !== searchIndicatorId)
+          }));
+          
+          if (searchResponse.results.length > 0) {
+            // Create a search results message with collapsible content
+            const searchResultsMessage: ChatMessage = {
+              id: generateId('search-results'),
+              sender: 'ai',
+              content: '', // Empty content since we're using searchData
+              timestamp: new Date().toISOString(),
+              isSearchResults: true,
+              searchData: {
+                query: searchResponse.query,
+                results: searchResponse.results.slice(0, 5), // Show top 5 results
+                scrapedContent: scrapedContent,
+                totalResults: searchResponse.results.length,
+                successfulScrapes: scrapedContent.summary.successful_scrapes
+              }
+            };
+            
+            // Add search results message to chat
+            this.addMessageToChat(searchResultsMessage);
+
+
+
+            // Inject search and scraped content directly into enhanced prompt for AI (not shown in chat)
+            const searchContext = this.buildSearchContextForPrompt(searchResponse, scrapedContent);
+            enhancedPrompt = `${prompt}\n\n[WEB SEARCH CONTEXT - Use this information to answer the user's question]\n${searchContext}`;
+          } else {
+            // Add a simple message for no results
+            this.addMessageToChat({
+              id: generateId('search-no-results'),
+              sender: 'ai',
+              content: 'No web search results found for your query. I will answer based on my knowledge.',
+              timestamp: new Date().toISOString()
+            });
+          }
+          
+          this.setState({ isSearching: false });
+          
+        } catch (searchError) {
+          console.error('Web search error:', searchError);
+          this.setState({ isSearching: false });
+          
+          // Remove search indicator if it exists
+          this.setState(prevState => ({
+            messages: prevState.messages.filter(msg => !msg.content.includes('🔍 Searching the web...'))
+          }));
+          
+          // Add error message
+          this.addMessageToChat({
+            id: generateId('search-error'),
+            sender: 'ai',
+            content: `⚠️ Web search failed: ${searchError instanceof Error ? searchError.message : 'Unknown error'}. I'll answer based on my knowledge.`,
+            timestamp: new Date().toISOString()
+          });
+        }
+      }
       
       // Create placeholder for AI response
       const placeholderId = generateId('ai');
@@ -1054,14 +1923,18 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         isStreaming: true
       });
       
+      // Track the current response content for proper abort handling
+      let currentResponseContent = '';
+      
       // Handle streaming chunks
       const onChunk = (chunk: string) => {
+        currentResponseContent += chunk;
         this.setState(prevState => {
           const updatedMessages = prevState.messages.map(message => {
             if (message.id === placeholderId) {
               return {
                 ...message,
-                content: message.content + chunk
+                content: this.cleanMessageContent(currentResponseContent)
               };
             }
             return message;
@@ -1069,15 +1942,25 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
           
           return { ...prevState, messages: updatedMessages };
         }, () => {
-          this.scrollToBottom();
+          // Only auto-scroll if user is near the bottom
+          if (this.isUserNearBottom()) {
+            this.scrollToBottom();
+          } else {
+            // Update scroll state to show scroll-to-bottom button
+            this.updateScrollState();
+          }
         });
       };
       
       // Handle conversation ID updates
       const onConversationId = (id: string) => {
+        console.log(`🔄 Conversation ID received: ${id}`);
         this.setState({ conversation_id: id }, () => {
-          // Refresh conversations list
-          this.fetchConversations();
+          console.log(`✅ Conversation ID updated in state: ${this.state.conversation_id}`);
+          // Refresh conversations list after a small delay to ensure backend has processed the conversation
+          setTimeout(() => {
+            this.refreshConversationsList();
+          }, 1000);
         });
       };
       
@@ -1086,7 +1969,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       
       // Send prompt to AI
       await this.aiService.sendPrompt(
-        prompt,
+        enhancedPrompt,
         this.state.selectedModel,
         this.state.useStreaming,
         this.state.conversation_id,
@@ -1094,36 +1977,82 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         onChunk,
         onConversationId,
         pageContext,
-        this.state.selectedPersona || undefined
+        this.state.selectedPersona || undefined,
+        this.currentStreamingAbortController
       );
       
       // Finalize the message
-      this.setState(prevState => ({
-        messages: prevState.messages.map(message => {
+      this.setState(prevState => {
+        console.log('✅ Finalizing message with ID:', placeholderId);
+        
+        const updatedMessages = prevState.messages.map(message => {
           if (message.id === placeholderId) {
+            const shouldPreserveContinue = message.isCutOff;
+            console.log(`✅ Finalizing message ${message.id}, isCutOff: ${message.isCutOff}, preserving canContinue: ${shouldPreserveContinue}`);
+            
             return {
               ...message,
-              isStreaming: false
+              isStreaming: false,
+              canRegenerate: true,
+              // Preserve canContinue state if message was cut off, otherwise set to false
+              canContinue: shouldPreserveContinue ? true : false
             };
           }
           return message;
-        }),
-        isLoading: false
-      }), () => {
+        });
+        
+        return {
+          messages: updatedMessages,
+          isLoading: false,
+          isStreaming: false
+        };
+      }, () => {
+        console.log(`✅ Message finalized. Total messages: ${this.state.messages.length}`);
         this.scrollToBottom();
         // Focus the input box after response is completed
         this.focusInput();
+        
+        // Refresh conversations list after the message is complete to include the new conversation
+        if (this.state.conversation_id) {
+          this.refreshConversationsList();
+        }
       });
       
+      // Clear abort controller
+      this.currentStreamingAbortController = null;
+      
     } catch (error) {
-      // Error in sendPromptToAI
-      this.setState({
-        isLoading: false,
-        error: `Error sending prompt: ${error instanceof Error ? error.message : 'Unknown error'}`
-      }, () => {
-        // Focus input even on error so user can try again
-        this.focusInput();
-      });
+      // Check if this was an abort error
+      if (error instanceof Error && error.name === 'AbortError') {
+        // Request was aborted, keep the partial response and mark it as stopped
+        this.setState(prevState => ({
+          isLoading: false,
+          isStreaming: false,
+          messages: prevState.messages.map(message => ({
+            ...message,
+            isStreaming: false,
+            canRegenerate: true,
+            // Only set canContinue and isCutOff for messages that are currently streaming
+            canContinue: message.isStreaming ? true : message.canContinue,
+            isCutOff: message.isStreaming ? true : message.isCutOff
+          }))
+        }), () => {
+          this.focusInput();
+        });
+      } else {
+        // Real error occurred
+        this.setState({
+          isLoading: false,
+          isStreaming: false,
+          error: `Error sending prompt: ${error instanceof Error ? error.message : 'Unknown error'}`
+        }, () => {
+          // Focus input even on error so user can try again
+          this.focusInput();
+        });
+      }
+      
+      // Clear abort controller
+      this.currentStreamingAbortController = null;
     }
   };
 
@@ -1146,7 +2075,9 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       personas,
       selectedPersona,
       isLoadingPersonas,
-      showPersonaSelection
+      showPersonaSelection,
+      useWebSearch,
+      isSearching
     } = this.state;
     
     const { promptQuestion } = this.props;
@@ -1155,27 +2086,18 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     return (
       <div className={`braindrive-chat-container ${themeClass}`}>
         <div className="chat-paper">
-          {/* Chat header with controls */}
+          {/* Chat header with controls (no conversation history) */}
           <ChatHeader
             models={models}
             selectedModel={selectedModel}
             isLoadingModels={isLoadingModels}
             onModelChange={this.handleModelChange}
             showModelSelection={showModelSelection}
-            personas={personas}
-            selectedPersona={selectedPersona}
-            isLoadingPersonas={isLoadingPersonas}
-            onPersonaChange={this.handlePersonaChange}
-            showPersonaSelection={showPersonaSelection}
-            conversations={conversations}
+            conversations={[]} // Empty for now, moved below
             selectedConversation={selectedConversation}
             onConversationSelect={this.handleConversationSelect}
             onNewChatClick={this.handleNewChatClick}
-            onRenameConversation={this.handleRenameConversation}
-            onDeleteConversation={this.handleDeleteConversation}
-            showConversationHistory={showConversationHistory}
-            useStreaming={useStreaming}
-            onToggleStreaming={this.toggleStreamingMode}
+            showConversationHistory={false} // Hide from header
             isLoading={isLoading}
             isLoadingHistory={isLoadingHistory}
           />
@@ -1186,27 +2108,170 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
           ) : (
             <>
               {/* Chat history area */}
-              <ChatHistory
-                messages={messages}
-                isLoading={isLoading}
-                isLoadingHistory={isLoadingHistory}
-                error={error}
-                chatHistoryRef={this.chatHistoryRef}
-              />
+              <div 
+                className="chat-history-container"
+                style={{
+                  height: this.state.chatHistoryHeight || 'auto',
+                  minHeight: this.state.chatHistoryHeight ? `${this.state.chatHistoryHeight}px` : '200px',
+                  maxHeight: this.state.chatHistoryHeight ? `${this.state.chatHistoryHeight}px` : '100%'
+                }}
+              >
+                <ChatHistory
+                  messages={messages}
+                  isLoading={isLoading}
+                  isLoadingHistory={isLoadingHistory}
+                  error={error}
+                  chatHistoryRef={this.chatHistoryRef}
+                  editingMessageId={this.state.editingMessageId}
+                  editingContent={this.state.editingContent}
+                  onStartEditing={this.startEditingMessage}
+                  onCancelEditing={this.cancelEditingMessage}
+                  onSaveEditing={this.saveEditedMessage}
+                  onEditingContentChange={(content) => this.setState({ editingContent: content })}
+                  onRegenerateResponse={this.regenerateResponse}
+                  onContinueGeneration={this.continueGeneration}
+                  showScrollToBottom={this.state.showScrollToBottom}
+                  onScrollToBottom={this.scrollToBottom}
+                  onToggleMarkdown={this.toggleMarkdownView}
+                />
+              </div>
+              
+              {/* Resizable divider */}
+              <div 
+                className="resize-handle"
+                onMouseDown={this.handleResizeStart}
+                title="Drag to resize"
+              >
+                <div className="resize-handle-line"></div>
+              </div>
               
               {/* Chat input area */}
               <ChatInput
                 inputText={inputText}
                 isLoading={isLoading}
                 isLoadingHistory={isLoadingHistory}
+                isStreaming={this.state.isStreaming}
                 selectedModel={selectedModel}
                 promptQuestion={promptQuestion}
                 onInputChange={this.handleInputChange}
                 onKeyPress={this.handleKeyPress}
                 onSendMessage={this.handleSendMessage}
+                onStopGeneration={this.stopGeneration}
+                onFileUpload={this.handleFileUploadClick}
+                onToggleWebSearch={this.toggleWebSearchMode}
+                useWebSearch={useWebSearch}
                 inputRef={this.inputRef}
+                personas={personas}
+                selectedPersona={selectedPersona}
+                onPersonaChange={this.handlePersonaChange}
+                onPersonaToggle={this.handlePersonaToggle}
+                showPersonaSelection={showPersonaSelection}
               />
             </>
+          )}
+          
+          {/* History section - moved below chat */}
+          {showConversationHistory && (
+            <div className={`history-section ${!this.state.isHistoryExpanded ? 'collapsed' : ''}`}>
+              <div className="history-header">
+                <button 
+                  className="history-accordion-button"
+                  onClick={this.toggleHistoryAccordion}
+                  aria-expanded={this.state.isHistoryExpanded}
+                >
+                  <label className="history-label">History</label>
+                  <span className={`history-accordion-icon ${this.state.isHistoryExpanded ? 'expanded' : 'collapsed'}`}>
+                    <ChevronDownIcon />
+                  </span>
+                </button>
+              </div>
+              {this.state.isHistoryExpanded && (
+                <div className="history-list">
+                {/* Start New Chat Item */}
+                <div 
+                  className={`history-item ${!selectedConversation ? 'active' : ''}`}
+                  onClick={this.handleNewChatClick}
+                >
+                  <div className="history-item-content">
+                    <PlusIcon />
+                    <span className="history-item-title">Start New Chat</span>
+                  </div>
+                </div>
+
+                {/* Recent Conversations */}
+                {conversations.slice(0, this.state.showAllHistory ? conversations.length : 2).map(conv => (
+                  <div 
+                    key={conv.id}
+                    className={`history-item ${selectedConversation?.id === conv.id ? 'active' : ''}`}
+                    onClick={() => this.handleConversationSelect({ target: { value: conv.id } } as any)}
+                  >
+                    <div className="history-item-content">
+                      <span className="history-item-title">{conv.title || 'Untitled'}</span>
+                    </div>
+                    <div className="history-item-actions">
+                      <button
+                        ref={this.state.openConversationMenu === conv.id ? (el) => this.menuButtonRef = el : null}
+                        className="history-action-button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          this.toggleConversationMenu(conv.id, e);
+                        }}
+                        title="More options"
+                      >
+                        <ThreeDotsIcon />
+                      </button>
+                      {this.state.openConversationMenu === conv.id && (
+                        <div 
+                          className="conversation-menu"
+                          style={{
+                            top: this.state.menuPosition?.top || 0,
+                            left: this.state.menuPosition?.left || 0
+                          }}
+                        >
+                          <div className="conversation-menu-item datetime">
+                            Created: {new Date(conv.created_at).toLocaleDateString()} {new Date(conv.created_at).toLocaleTimeString()}
+                          </div>
+                          {/* <button className="conversation-menu-item" onClick={() => this.handleShareConversation(conv.id)}>
+                            <ShareIcon />
+                            <span>Share</span>
+                          </button> */}
+                          <button className="conversation-menu-item" onClick={() => this.handleRenameConversation(conv.id)}>
+                            <EditIcon />
+                            <span>Rename</span>
+                          </button>
+                          <button className="conversation-menu-item danger" onClick={() => this.handleDeleteConversation(conv.id)}>
+                            <DeleteIcon />
+                            <span>Delete</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+
+                {/* See More Button */}
+                {conversations.length > 2 && !this.state.showAllHistory && (
+                  <button 
+                    className="see-more-button"
+                    onClick={() => this.setState({ showAllHistory: true })}
+                    disabled={isLoading || isLoadingHistory}
+                  >
+                    See More ({conversations.length - 2} more)
+                  </button>
+                )}
+
+                {/* Show Less Button */}
+                {this.state.showAllHistory && conversations.length > 2 && (
+                  <button 
+                    className="see-more-button"
+                    onClick={() => this.setState({ showAllHistory: false })}
+                  >
+                    Show Less
+                  </button>
+                )}
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -1215,6 +2280,6 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
 }
 
 // Add version information for debugging and tracking
-(BrainDriveChat as any).version = '1.0.0';
+(BrainDriveChat as any).version = '1.0.1';
 
 export default BrainDriveChat;
