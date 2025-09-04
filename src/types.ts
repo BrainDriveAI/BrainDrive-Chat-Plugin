@@ -248,7 +248,6 @@ export interface BrainDriveChatState {
   // History UI state
   showAllHistory: boolean;
   openConversationMenu: string | null;
-  menuPosition?: { top: number; left: number };
   isHistoryExpanded: boolean;
   
   // Resize state

@@ -142,9 +142,6 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
 
     const { isMenuOpen, showPersonaSelector } = this.state;
     
-    // Debug logging for persona state
-    console.log(`🎭 ChatInput render - showPersonaSelection: ${showPersonaSelection}, selectedPersona: ${selectedPersona?.name || 'null'}, showPersonaSelector: ${showPersonaSelector}`);
-
     return (
       <div className="chat-input-container">
         <div className="chat-input-wrapper">

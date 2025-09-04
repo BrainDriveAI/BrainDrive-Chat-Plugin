@@ -150,6 +150,9 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     // Add global key event listener for ESC key
     document.addEventListener('keydown', this.handleGlobalKeyPress);
     
+    // Add click outside listener to close conversation menu
+    document.addEventListener('mousedown', this.handleClickOutside);
+    
     // Add scroll event listener to track scroll position
     if (this.chatHistoryRef.current) {
       this.chatHistoryRef.current.addEventListener('scroll', this.handleScroll);
@@ -207,6 +210,9 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     
     // Clean up global key event listener
     document.removeEventListener('keydown', this.handleGlobalKeyPress);
+    
+    // Clean up click outside listener
+    document.removeEventListener('mousedown', this.handleClickOutside);
     
     // Clean up scroll event listener
     if (this.chatHistoryRef.current) {
@@ -979,31 +985,22 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
    * Toggle conversation menu
    */
   toggleConversationMenu = (conversationId: string, event?: React.MouseEvent<HTMLButtonElement>) => {
-    const isOpening = this.state.openConversationMenu !== conversationId;
+    console.log('🔍 toggleConversationMenu called:', { conversationId, hasEvent: !!event });
     
-    if (isOpening && event) {
-      const button = event.currentTarget;
-      const rect = button.getBoundingClientRect();
-      const menuHeight = 200; // Approximate menu height
-      
-      // Calculate position - show above button if there's not enough space below
-      const spaceBelow = window.innerHeight - rect.bottom;
-      const shouldShowAbove = spaceBelow < menuHeight;
-      
-      const top = shouldShowAbove 
-        ? rect.top - menuHeight - 8
-        : rect.bottom + 8;
-      
-      const left = Math.max(8, rect.right - 200); // 200px menu width, 8px margin from edge
-      
+    const isOpening = this.state.openConversationMenu !== conversationId;
+    console.log('🔍 isOpening:', isOpening);
+    
+    if (isOpening) {
+      // Simple toggle - CSS handles all positioning
       this.setState({
-        openConversationMenu: conversationId,
-        menuPosition: { top, left }
+        openConversationMenu: conversationId
+      }, () => {
+        console.log('🔍 Menu opened for conversation:', conversationId);
       });
     } else {
+      console.log('🔍 Closing menu');
       this.setState({
-        openConversationMenu: null,
-        menuPosition: undefined
+        openConversationMenu: null
       });
     }
   };
@@ -1549,6 +1546,29 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       e.preventDefault();
       this.stopGeneration();
     }
+    
+    // ESC key to close conversation menu
+    if (e.key === 'Escape' && this.state.openConversationMenu) {
+      e.preventDefault();
+      this.setState({ openConversationMenu: null });
+    }
+  };
+
+  /**
+   * Handle click outside to close conversation menu
+   */
+  handleClickOutside = (e: MouseEvent) => {
+    if (!this.state.openConversationMenu) return;
+    
+    const target = e.target as Element;
+    
+    // Don't close if clicking on the menu button or menu itself
+    if (target.closest('.history-action-button') || target.closest('.conversation-menu')) {
+      return;
+    }
+    
+    // Close the menu
+    this.setState({ openConversationMenu: null });
   };
 
   /**
@@ -2221,13 +2241,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
                         <ThreeDotsIcon />
                       </button>
                       {this.state.openConversationMenu === conv.id && (
-                        <div 
-                          className="conversation-menu"
-                          style={{
-                            top: this.state.menuPosition?.top || 0,
-                            left: this.state.menuPosition?.left || 0
-                          }}
-                        >
+                        <div className="conversation-menu">
                           <div className="conversation-menu-item datetime">
                             Created: {new Date(conv.created_at).toLocaleDateString()} {new Date(conv.created_at).toLocaleTimeString()}
                           </div>
