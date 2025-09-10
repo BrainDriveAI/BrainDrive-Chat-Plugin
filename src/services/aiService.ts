@@ -38,7 +38,8 @@ export class AIService {
     onChunk: (chunk: string) => void,
     onConversationId: (id: string) => void,
     pageContext?: any, // New parameter for page context
-    selectedPersona?: PersonaInfo  // Add persona parameter
+    selectedPersona?: PersonaInfo,  // Add persona parameter
+    abortController?: AbortController // Add abort controller for cancellation
   ): Promise<boolean> {
     if (!this.services?.api) {
       throw new Error('API service not available');
@@ -71,6 +72,8 @@ export class AIService {
       conversation_id: conversationId,
       conversation_type: conversationType // New field
     };
+    
+    console.log(`📤 AIService sending request with conversation_id: ${conversationId || 'null'}`);
 
     // Add page context if available
     if (pageContext) {
@@ -109,6 +112,11 @@ export class AIService {
             requestParams,
             (chunk: string) => {
               try {
+                // Check if request was aborted
+                if (abortController?.signal.aborted) {
+                  return;
+                }
+                
                 // Handle Server-Sent Events format - remove 'data: ' prefix if present
                 let jsonString = chunk;
                 if (chunk.startsWith('data: ')) {
@@ -136,13 +144,17 @@ export class AIService {
               }
             },
             {
-              timeout: 120000
+              timeout: 120000,
+              signal: abortController?.signal
             }
           );
           success = true;
         } catch (error) {
           console.error('Streaming error:', error);
-          throw error;
+          // Don't throw AbortError as it's expected when canceling
+          if (error instanceof Error && error.name !== 'AbortError') {
+            throw error;
+          }
         }
       } else {
         // Handle non-streaming
@@ -218,6 +230,21 @@ export class AIService {
     } catch (error) {
       console.error('Error updating conversation persona:', error);
       throw error;
+    }
+  }
+
+  async cancelGeneration(conversationId: string | null): Promise<void> {
+    if (!this.services?.api || !conversationId) {
+      return;
+    }
+
+    try {
+      await this.services.api.post(
+        `/api/v1/ai/providers/cancel`,
+        { conversation_id: conversationId }
+      );
+    } catch (error) {
+      console.error('Error canceling generation:', error);
     }
   }
 }
