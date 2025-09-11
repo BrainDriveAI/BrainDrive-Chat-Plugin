@@ -21,8 +21,6 @@ interface ChatHeaderProps {
   // Loading states
   isLoading: boolean;
   isLoadingHistory: boolean;
-  
-
 }
 
 interface ChatHeaderState {
@@ -84,36 +82,16 @@ class ChatHeader extends React.Component<ChatHeaderProps, ChatHeaderState> {
             </div>
           )}
 
-          {/* Center Section - History Dropdown */}
-          {showConversationHistory && (
-            <div className="header-history-section">
-              <label className="header-label">History</label>
-              <select
-                value={selectedConversation?.id || ''}
-                onChange={onConversationSelect}
-                className="header-select header-select-history"
-                disabled={isLoading || isLoadingHistory}
-              >
-                <option value="">Select a conversation or start new</option>
-                {conversations.map(conv => (
-                  <option key={conv.id} value={conv.id}>
-                    {conv.title || 'Untitled'} • {formatRelativeTime(conv.created_at)}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
           {/* Right Section - New Chat Button */}
           <div className="header-actions-section">
-                         <button
-               className="header-new-chat-button"
-               onClick={onNewChatClick}
-               disabled={isLoading}
-               title="Start New Chat"
-             >
-               <ComposeIcon />
-             </button>
+            <button
+              className="header-new-chat-button"
+              onClick={onNewChatClick}
+              disabled={isLoading}
+              title="Start New Chat"
+            >
+              <ComposeIcon />
+            </button>
           </div>
         </div>
       </>

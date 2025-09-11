@@ -93,12 +93,16 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
   };
 
   handleFileUpload = () => {
-    this.props.onFileUpload();
+    if (this.props.onFileUpload) {
+      this.props.onFileUpload();
+    }
     this.setState({ isMenuOpen: false });
   };
 
   handleWebSearchToggle = () => {
-    this.props.onToggleWebSearch();
+    if (this.props.onToggleWebSearch) {
+      this.props.onToggleWebSearch();
+    }
     this.setState({ isMenuOpen: false });
   };
 
@@ -161,8 +165,8 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
             <div className="input-buttons-row">
               {/* Left side buttons */}
               <div className="input-buttons-left">
-                {/* 3-Dots Menu - Bottom Left */}
-                <div className="menu-container" ref={this.menuRef}>
+                {/* More button temporarily disabled for production release */}
+                {/* <div className="menu-container" ref={this.menuRef}>
                   <button
                     onClick={this.toggleMenu}
                     disabled={isLoading || isLoadingHistory || isStreaming}
@@ -202,10 +206,10 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
                       )}
                     </div>
                   )}
-                </div>
+                </div> */}
 
-                {/* Persona Selector - shown when enabled, to the right of more button */}
-                {showPersonaSelector && showPersonaSelection && (
+                {/* Persona Selector - always shown when personas are available */}
+                {showPersonaSelection && (
                   <select
                     value={selectedPersona?.id || ''}
                     onChange={onPersonaChange}

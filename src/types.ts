@@ -249,10 +249,6 @@ export interface BrainDriveChatState {
   showAllHistory: boolean;
   openConversationMenu: string | null;
   isHistoryExpanded: boolean;
-  
-  // Resize state
-  chatHistoryHeight?: number;
-  isResizing: boolean;
 }
 
 // Provider settings

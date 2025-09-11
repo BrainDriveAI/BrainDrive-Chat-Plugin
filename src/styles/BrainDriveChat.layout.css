@@ -150,6 +150,7 @@
   justify-content: space-between;
   align-items: center;
   pointer-events: none; /* Allow clicking through to buttons */
+  z-index: 1; /* Ensure buttons stay above input */
 }
 
 .input-buttons-row > * {
@@ -214,10 +215,12 @@
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  max-height: 300px;
+  max-height: calc(40vh - 60px); /* Dynamic height based on viewport */
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--border-color) transparent;
+  padding-right: 8px; /* Add padding for scrollbar */
+  margin-bottom: 8px; /* Add margin to ensure last items are visible */
 }
 
 .history-list::-webkit-scrollbar {
