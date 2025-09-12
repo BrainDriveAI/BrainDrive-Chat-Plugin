@@ -50,6 +50,15 @@ export const API_CONFIG = {
   MAX_CONVERSATION_FETCH_LIMIT: 50,
 } as const;
 
+// Provider -> settings_id mapping used when calling chat endpoints
+export const PROVIDER_SETTINGS_ID_MAP: Record<string, string> = {
+  ollama: 'ollama_servers_settings',
+  openai: 'openai_api_keys_settings',
+  openrouter: 'openrouter_api_keys_settings',
+  claude: 'claude_api_keys_settings',
+  groq: 'groq_api_keys_settings',
+};
+
 // Theme Configuration
 export const THEME_CONFIG = {
   DEFAULT_THEME: 'light',

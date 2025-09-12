@@ -109,23 +109,33 @@
   border-radius: 0.5rem;
   background-color: var(--input-bg);
   transition: border-color 0.3s ease;
+  padding: 0.25rem 0.5rem; /* breathing room for flex row */
 }
 
 .input-with-buttons:focus-within {
   border-color: var(--button-primary-bg);
 }
 
+.chat-input-row {
+  display: flex;
+  align-items: center; /* center when single line */
+  gap: 0.5rem;
+}
+
+.chat-input-row.multiline {
+  align-items: flex-end; /* snap to bottom when multiline */
+}
+
 .chat-input {
   width: 100%;
-  padding: 0.75rem;
-  padding-bottom: 3rem; /* Make room for button row */
+  padding: 0.5rem 0.75rem;
   border: none !important; /* Force no border on textarea */
   border-radius: 0.5rem;
   background-color: transparent;
   color: var(--text-color);
   resize: none;
-  min-height: 4rem;
-  max-height: 9.375rem;
+  min-height: calc(1.5em + 0.5rem); /* ~1 line */
+  max-height: calc(1.5em * 4 + 0.5rem); /* ~4 lines */
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--border-color) transparent;
@@ -140,29 +150,7 @@
   outline: none;
 }
 
-/* Button row at bottom of input */
-.input-buttons-row {
-  position: absolute;
-  bottom: 0.5rem;
-  left: 0.5rem;
-  right: 0.5rem;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  pointer-events: none; /* Allow clicking through to buttons */
-  z-index: 1; /* Ensure buttons stay above input */
-}
-
-.input-buttons-row > * {
-  pointer-events: auto; /* Re-enable pointer events for buttons */
-}
-
-/* Left side buttons container */
-.input-buttons-left {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
+/* Overlay button row removed in favor of inline flex layout */
 
 /* Resize Handle */
 .resize-handle {

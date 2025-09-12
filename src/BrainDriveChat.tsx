@@ -20,7 +20,8 @@ import {
   UI_CONFIG,
   API_CONFIG,
   ERROR_MESSAGES,
-  SUCCESS_MESSAGES
+  SUCCESS_MESSAGES,
+  PROVIDER_SETTINGS_ID_MAP
 } from './constants';
 
 // Import modular components
@@ -35,14 +36,7 @@ import {
 import { AIService, SearchService, DocumentService } from './services';
 
 // Import icons
-import {
-  PlusIcon,
-  ThreeDotsIcon,
-  ShareIcon,
-  EditIcon,
-  DeleteIcon,
-  ChevronDownIcon
-} from './icons';
+// Icons previously used in the bottom history panel are no longer needed here
 
 /**
  * Unified BrainDriveChat component that combines AI chat, model selection, and conversation history
@@ -439,116 +433,115 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
    */
   loadProviderSettings = async () => {
     this.setState({ isLoadingModels: true, error: '' });
-    
+
     if (!this.props.services?.api) {
-      this.setState({ 
-        isLoadingModels: false, 
-        error: 'API service not available' 
+      this.setState({
+        isLoadingModels: false,
+        error: 'API service not available'
       });
       return;
     }
-    
+
     try {
-      // Get provider settings from configuration or use default
-      const providerSettingIds = ['ollama_servers_settings'];
-      const models: ModelInfo[] = [];
-      
-      // Load each provider setting
-      for (const settingId of providerSettingIds) {
-        try {
-          const response = await this.props.services.api.get('/api/v1/settings/instances', {
-            params: {
-              definition_id: settingId,
-              scope: 'user',
-              user_id: 'current'
-            }
-          });
-          
-          // Process response to extract settings data
-          let settingsData = null;
-          
-          if (Array.isArray(response) && response.length > 0) {
-            settingsData = response[0];
-          } else if (response && typeof response === 'object') {
-            const responseObj = response as Record<string, any>;
-            
-            if (responseObj.data) {
-              if (Array.isArray(responseObj.data) && responseObj.data.length > 0) {
-                settingsData = responseObj.data[0];
-              } else if (typeof responseObj.data === 'object') {
-                settingsData = responseObj.data;
-              }
-            } else {
-              settingsData = response;
-            }
-          }
-          
-          if (settingsData && settingsData.value) {
-            // Parse the value field
-            let parsedValue = typeof settingsData.value === 'string' 
-              ? JSON.parse(settingsData.value) 
-              : settingsData.value;
-            
-            const providerSetting = {
-              id: settingId,
-              name: settingsData.name || settingId,
-              servers: Array.isArray(parsedValue.servers) ? parsedValue.servers : []
-            };
-            
-            // Load models for each server
-            for (const server of providerSetting.servers) {
-              try {
-                const encodedUrl = encodeURIComponent(server.serverAddress);
-                const params: Record<string, string> = { 
-                  server_url: encodedUrl,
-                  settings_id: providerSetting.id,
-                  server_id: server.id
-                };
-                
-                if (server.apiKey) {
-                  params.api_key = server.apiKey;
-                }
-                
-                const modelResponse = await this.props.services.api.get('/api/v1/ollama/models', { params });
-                const serverModels = Array.isArray(modelResponse) ? modelResponse : [];
-                
-                // Map server models to ModelInfo format
-                for (const model of serverModels) {
-                  models.push({
-                    name: model.name,
-                    provider: 'ollama',
-                    providerId: providerSetting.id,
-                    serverName: server.serverName,
-                    serverId: server.id
-                  });
-                }
-              } catch (error) {
-                console.error(`Error loading models for server ${server.serverName}:`, error);
-              }
-            }
-          }
-        } catch (error) {
-          console.error(`Error loading provider setting ${settingId}:`, error);
-        }
-      }
-      
-      // Update state with models
-      this.setState({
-        models,
-        isLoadingModels: false,
-        selectedModel: models.length > 0 ? models[0] : null
-      });
-      
-      // Broadcast initial model selection if available
+      const resp = await this.props.services.api.get('/api/v1/ai/providers/all-models');
+      const raw = (resp && (resp as any).models)
+        || (resp && (resp as any).data && (resp as any).data.models)
+        || (Array.isArray(resp) ? resp : []);
+
+      const models: ModelInfo[] = Array.isArray(raw)
+        ? raw.map((m: any) => {
+            const provider = m.provider || 'ollama';
+            const providerId = PROVIDER_SETTINGS_ID_MAP[provider] || provider;
+            const serverId = m.server_id || m.serverId || 'unknown';
+            const serverName = m.server_name || m.serverName || 'Unknown Server';
+            const name = m.name || m.id || '';
+            return {
+              name,
+              provider,
+              providerId,
+              serverName,
+              serverId,
+            } as ModelInfo;
+          })
+        : [];
+
       if (models.length > 0) {
+        this.setState({
+          models,
+          isLoadingModels: false,
+          selectedModel: models[0],
+        });
         this.broadcastModelSelection(models[0]);
+        return;
+      }
+
+      // Fallback: Try Ollama-only via settings + /api/v1/ollama/models
+      try {
+        const settingsResp = await this.props.services.api.get('/api/v1/settings/instances', {
+          params: {
+            definition_id: 'ollama_servers_settings',
+            scope: 'user',
+            user_id: 'current',
+          },
+        });
+
+        let settingsData: any = null;
+        if (Array.isArray(settingsResp) && settingsResp.length > 0) settingsData = settingsResp[0];
+        else if (settingsResp && typeof settingsResp === 'object') {
+          const obj = settingsResp as any;
+          if (obj.data) settingsData = Array.isArray(obj.data) ? obj.data[0] : obj.data;
+          else settingsData = settingsResp;
+        }
+
+        const fallbackModels: ModelInfo[] = [];
+        if (settingsData && settingsData.value) {
+          const parsedValue = typeof settingsData.value === 'string'
+            ? JSON.parse(settingsData.value)
+            : settingsData.value;
+          const servers = Array.isArray(parsedValue?.servers) ? parsedValue.servers : [];
+          for (const server of servers) {
+            try {
+              const params: Record<string, string> = {
+                server_url: encodeURIComponent(server.serverAddress),
+                settings_id: 'ollama_servers_settings',
+                server_id: server.id,
+              };
+              if (server.apiKey) params.api_key = server.apiKey;
+              const modelResponse = await this.props.services.api.get('/api/v1/ollama/models', { params });
+              const serverModels = Array.isArray(modelResponse) ? modelResponse : [];
+              for (const m of serverModels) {
+                fallbackModels.push({
+                  name: m.name,
+                  provider: 'ollama',
+                  providerId: 'ollama_servers_settings',
+                  serverName: server.serverName,
+                  serverId: server.id,
+                });
+              }
+            } catch (innerErr) {
+              console.error('Fallback: error loading Ollama models for server', server?.serverName, innerErr);
+            }
+          }
+        }
+
+        this.setState({
+          models: fallbackModels,
+          isLoadingModels: false,
+          selectedModel: fallbackModels.length > 0 ? fallbackModels[0] : null,
+        });
+        if (fallbackModels.length > 0) this.broadcastModelSelection(fallbackModels[0]);
+        return;
+      } catch (fallbackErr) {
+        console.error('Fallback: error loading Ollama settings/models:', fallbackErr);
+        this.setState({ models: [], selectedModel: null, isLoadingModels: false });
       }
     } catch (error: any) {
-      console.error("Error loading provider settings:", error);
-      
+      console.error('Error loading models from all providers:', error);
       this.setState({
+        models: [],
+        selectedModel: null,
         isLoadingModels: false,
-        error: `Error loading models: ${error.message || 'Unknown error'}`
+        error: `Error loading models: ${error.message || 'Unknown error'}`,
       });
     }
   };
@@ -1746,10 +1739,14 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     this.setState({ inputText: e.target.value });
     
-    // Auto-resize the textarea
+    // Auto-resize the textarea: 1 → 4 lines, then scroll
     if (this.inputRef.current) {
-      this.inputRef.current.style.height = 'auto';
-      this.inputRef.current.style.height = `${Math.min(this.inputRef.current.scrollHeight, 150)}px`;
+      const ta = this.inputRef.current;
+      ta.style.height = 'auto';
+      const computed = window.getComputedStyle(ta);
+      const lineHeight = parseFloat(computed.lineHeight || '0') || 24; // fallback if not computable
+      const maxHeight = lineHeight * 4; // 4 lines max
+      ta.style.height = `${Math.min(ta.scrollHeight, maxHeight)}px`;
     }
   };
 
@@ -2085,18 +2082,24 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     return (
       <div className={`braindrive-chat-container ${themeClass}`}>
         <div className="chat-paper">
-          {/* Chat header with controls (no conversation history) */}
+          {/* Chat header with controls and history dropdown */}
           <ChatHeader
             models={models}
             selectedModel={selectedModel}
             isLoadingModels={isLoadingModels}
             onModelChange={this.handleModelChange}
             showModelSelection={showModelSelection}
-            conversations={[]} // Empty for now, moved below
+            personas={personas}
+            selectedPersona={selectedPersona}
+            onPersonaChange={this.handlePersonaChange}
+            showPersonaSelection={showPersonaSelection}
+            conversations={conversations}
             selectedConversation={selectedConversation}
             onConversationSelect={this.handleConversationSelect}
             onNewChatClick={this.handleNewChatClick}
-            showConversationHistory={false} // Hide from header
+            showConversationHistory={true}
+            onRenameSelectedConversation={(id) => this.handleRenameConversation(id)}
+            onDeleteSelectedConversation={(id) => this.handleDeleteConversation(id)}
             isLoading={isLoading}
             isLoadingHistory={isLoadingHistory}
           />
@@ -2149,108 +2152,12 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
                 selectedPersona={selectedPersona}
                 onPersonaChange={this.handlePersonaChange}
                 onPersonaToggle={this.handlePersonaToggle}
-                showPersonaSelection={true} // Always show persona selection
+                showPersonaSelection={false} // Moved to header
               />
             </>
           )}
           
-          {/* History section - moved below chat */}
-          {showConversationHistory && (
-            <div className={`history-section ${!this.state.isHistoryExpanded ? 'collapsed' : ''}`}>
-              <div className="history-header">
-                <button 
-                  className="history-accordion-button"
-                  onClick={this.toggleHistoryAccordion}
-                  aria-expanded={this.state.isHistoryExpanded}
-                >
-                  <label className="history-label">History</label>
-                  <span className={`history-accordion-icon ${this.state.isHistoryExpanded ? 'expanded' : 'collapsed'}`}>
-                    <ChevronDownIcon />
-                  </span>
-                </button>
-              </div>
-              {this.state.isHistoryExpanded && (
-                <div className="history-list">
-                {/* Start New Chat Item */}
-                <div 
-                  className={`history-item ${!selectedConversation ? 'active' : ''}`}
-                  onClick={this.handleNewChatClick}
-                >
-                  <div className="history-item-content">
-                    <PlusIcon />
-                    <span className="history-item-title">Start New Chat</span>
-                  </div>
-                </div>
-
-                {/* Recent Conversations */}
-                {conversations.slice(0, this.state.showAllHistory ? conversations.length : 2).map(conv => (
-                  <div 
-                    key={conv.id}
-                    className={`history-item ${selectedConversation?.id === conv.id ? 'active' : ''}`}
-                    onClick={() => this.handleConversationSelect({ target: { value: conv.id } } as any)}
-                  >
-                    <div className="history-item-content">
-                      <span className="history-item-title">{conv.title || 'Untitled'}</span>
-                    </div>
-                    <div className="history-item-actions">
-                      <button
-                        ref={this.state.openConversationMenu === conv.id ? (el) => this.menuButtonRef = el : null}
-                        className="history-action-button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          this.toggleConversationMenu(conv.id, e);
-                        }}
-                        title="More options"
-                      >
-                        <ThreeDotsIcon />
-                      </button>
-                      {this.state.openConversationMenu === conv.id && (
-                        <div className="conversation-menu">
-                          <div className="conversation-menu-item datetime">
-                            Created: {new Date(conv.created_at).toLocaleDateString()} {new Date(conv.created_at).toLocaleTimeString()}
-                          </div>
-                          {/* <button className="conversation-menu-item" onClick={() => this.handleShareConversation(conv.id)}>
-                            <ShareIcon />
-                            <span>Share</span>
-                          </button> */}
-                          <button className="conversation-menu-item" onClick={() => this.handleRenameConversation(conv.id)}>
-                            <EditIcon />
-                            <span>Rename</span>
-                          </button>
-                          <button className="conversation-menu-item danger" onClick={() => this.handleDeleteConversation(conv.id)}>
-                            <DeleteIcon />
-                            <span>Delete</span>
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-
-                {/* See More Button */}
-                {conversations.length > 2 && !this.state.showAllHistory && (
-                  <button 
-                    className="see-more-button"
-                    onClick={() => this.setState({ showAllHistory: true })}
-                    disabled={isLoading || isLoadingHistory}
-                  >
-                    See More ({conversations.length - 2} more)
-                  </button>
-                )}
-
-                {/* Show Less Button */}
-                {this.state.showAllHistory && conversations.length > 2 && (
-                  <button 
-                    className="see-more-button"
-                    onClick={() => this.setState({ showAllHistory: false })}
-                  >
-                    Show Less
-                  </button>
-                )}
-                </div>
-              )}
-            </div>
-          )}
+          {/* Bottom history panel removed; history is now in header */}
         </div>
       </div>
     );
