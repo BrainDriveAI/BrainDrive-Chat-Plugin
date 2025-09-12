@@ -96,7 +96,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       personas: props.availablePersonas || [],
       selectedPersona: null, // Default to no persona
       isLoadingPersonas: !props.availablePersonas,
-      showPersonaSelection: props.showPersonaSelection !== false,
+      showPersonaSelection: true, // Always show persona selection
       
       // Web search state
       useWebSearch: false,
@@ -118,11 +118,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       // History UI state
       showAllHistory: false,
       openConversationMenu: null,
-      isHistoryExpanded: true, // History accordion state
-      
-      // Resize state
-      chatHistoryHeight: undefined,
-      isResizing: false
+      isHistoryExpanded: true, // History accordion state      
     };
     
     // Bind methods
@@ -1322,7 +1318,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   };
 
   /**
-   * Continue generation from where it left off
+   * Continue generation from where it left off by replacing the stopped message
    */
   continueGeneration = async () => {
     const lastAiMessage = this.state.messages
@@ -1330,8 +1326,20 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       .pop();
     
     if (lastAiMessage && lastAiMessage.canContinue) {
-      // Send a "continue" prompt to the AI
-      await this.sendPromptToAI('continue');
+      // Find the last user message to get the original prompt
+      const lastUserMessage = [...this.state.messages]
+        .reverse()
+        .find(msg => msg.sender === 'user');
+      
+      if (!lastUserMessage) return;
+      
+      // Remove the cut-off message
+      this.setState(prevState => ({
+        messages: prevState.messages.filter(msg => msg.id !== lastAiMessage.id)
+      }), async () => {
+        // Send the original prompt to continue generation
+        await this.sendPromptToAI(lastUserMessage.content);
+      });
     }
   };
 
@@ -1580,8 +1588,6 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     }));
   };
 
-
-
   /**
    * Auto-close accordions on first message
    */
@@ -1593,33 +1599,6 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         isHistoryExpanded: false
       });
     }
-  };
-
-  /**
-   * Handle resize start
-   */
-  handleResizeStart = (e: React.MouseEvent) => {
-    e.preventDefault();
-    this.setState({ isResizing: true });
-    
-    const startY = e.clientY;
-    const startHeight = this.chatHistoryRef.current?.clientHeight || 400;
-    
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      const deltaY = moveEvent.clientY - startY;
-      const newHeight = Math.max(200, Math.min(800, startHeight + deltaY));
-      
-      this.setState({ chatHistoryHeight: newHeight });
-    };
-    
-    const handleMouseUp = () => {
-      this.setState({ isResizing: false });
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-    
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
   };
 
 
@@ -2128,14 +2107,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
           ) : (
             <>
               {/* Chat history area */}
-              <div 
-                className="chat-history-container"
-                style={{
-                  height: this.state.chatHistoryHeight || 'auto',
-                  minHeight: this.state.chatHistoryHeight ? `${this.state.chatHistoryHeight}px` : '200px',
-                  maxHeight: this.state.chatHistoryHeight ? `${this.state.chatHistoryHeight}px` : '100%'
-                }}
-              >
+              <div className="chat-history-container">
                 <ChatHistory
                   messages={messages}
                   isLoading={isLoading}
@@ -2156,17 +2128,9 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
                 />
               </div>
               
-              {/* Resizable divider */}
-              <div 
-                className="resize-handle"
-                onMouseDown={this.handleResizeStart}
-                title="Drag to resize"
-              >
-                <div className="resize-handle-line"></div>
-              </div>
               
               {/* Chat input area */}
-              <ChatInput
+                <ChatInput
                 inputText={inputText}
                 isLoading={isLoading}
                 isLoadingHistory={isLoadingHistory}
@@ -2185,7 +2149,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
                 selectedPersona={selectedPersona}
                 onPersonaChange={this.handlePersonaChange}
                 onPersonaToggle={this.handlePersonaToggle}
-                showPersonaSelection={showPersonaSelection}
+                showPersonaSelection={true} // Always show persona selection
               />
             </>
           )}
