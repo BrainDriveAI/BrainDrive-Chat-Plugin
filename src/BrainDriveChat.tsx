@@ -36,14 +36,7 @@ import {
 import { AIService, SearchService, DocumentService } from './services';
 
 // Import icons
-import {
-  PlusIcon,
-  ThreeDotsIcon,
-  ShareIcon,
-  EditIcon,
-  DeleteIcon,
-  ChevronDownIcon
-} from './icons';
+// Icons previously used in the bottom history panel are no longer needed here
 
 /**
  * Unified BrainDriveChat component that combines AI chat, model selection, and conversation history
@@ -2089,7 +2082,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     return (
       <div className={`braindrive-chat-container ${themeClass}`}>
         <div className="chat-paper">
-          {/* Chat header with controls (no conversation history) */}
+          {/* Chat header with controls and history dropdown */}
           <ChatHeader
             models={models}
             selectedModel={selectedModel}
@@ -2100,11 +2093,13 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
             selectedPersona={selectedPersona}
             onPersonaChange={this.handlePersonaChange}
             showPersonaSelection={showPersonaSelection}
-            conversations={[]} // Empty for now, moved below
+            conversations={conversations}
             selectedConversation={selectedConversation}
             onConversationSelect={this.handleConversationSelect}
             onNewChatClick={this.handleNewChatClick}
-            showConversationHistory={false} // Hide from header
+            showConversationHistory={true}
+            onRenameSelectedConversation={(id) => this.handleRenameConversation(id)}
+            onDeleteSelectedConversation={(id) => this.handleDeleteConversation(id)}
             isLoading={isLoading}
             isLoadingHistory={isLoadingHistory}
           />
@@ -2162,103 +2157,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
             </>
           )}
           
-          {/* History section - moved below chat */}
-          {showConversationHistory && (
-            <div className={`history-section ${!this.state.isHistoryExpanded ? 'collapsed' : ''}`}>
-              <div className="history-header">
-                <button 
-                  className="history-accordion-button"
-                  onClick={this.toggleHistoryAccordion}
-                  aria-expanded={this.state.isHistoryExpanded}
-                >
-                  <label className="history-label">History</label>
-                  <span className={`history-accordion-icon ${this.state.isHistoryExpanded ? 'expanded' : 'collapsed'}`}>
-                    <ChevronDownIcon />
-                  </span>
-                </button>
-              </div>
-              {this.state.isHistoryExpanded && (
-                <div className="history-list">
-                {/* Start New Chat Item */}
-                <div 
-                  className={`history-item ${!selectedConversation ? 'active' : ''}`}
-                  onClick={this.handleNewChatClick}
-                >
-                  <div className="history-item-content">
-                    <PlusIcon />
-                    <span className="history-item-title">Start New Chat</span>
-                  </div>
-                </div>
-
-                {/* Recent Conversations */}
-                {conversations.slice(0, this.state.showAllHistory ? conversations.length : 2).map(conv => (
-                  <div 
-                    key={conv.id}
-                    className={`history-item ${selectedConversation?.id === conv.id ? 'active' : ''}`}
-                    onClick={() => this.handleConversationSelect({ target: { value: conv.id } } as any)}
-                  >
-                    <div className="history-item-content">
-                      <span className="history-item-title">{conv.title || 'Untitled'}</span>
-                    </div>
-                    <div className="history-item-actions">
-                      <button
-                        ref={this.state.openConversationMenu === conv.id ? (el) => this.menuButtonRef = el : null}
-                        className="history-action-button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          this.toggleConversationMenu(conv.id, e);
-                        }}
-                        title="More options"
-                      >
-                        <ThreeDotsIcon />
-                      </button>
-                      {this.state.openConversationMenu === conv.id && (
-                        <div className="conversation-menu">
-                          <div className="conversation-menu-item datetime">
-                            Created: {new Date(conv.created_at).toLocaleDateString()} {new Date(conv.created_at).toLocaleTimeString()}
-                          </div>
-                          {/* <button className="conversation-menu-item" onClick={() => this.handleShareConversation(conv.id)}>
-                            <ShareIcon />
-                            <span>Share</span>
-                          </button> */}
-                          <button className="conversation-menu-item" onClick={() => this.handleRenameConversation(conv.id)}>
-                            <EditIcon />
-                            <span>Rename</span>
-                          </button>
-                          <button className="conversation-menu-item danger" onClick={() => this.handleDeleteConversation(conv.id)}>
-                            <DeleteIcon />
-                            <span>Delete</span>
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-
-                {/* See More Button */}
-                {conversations.length > 2 && !this.state.showAllHistory && (
-                  <button 
-                    className="see-more-button"
-                    onClick={() => this.setState({ showAllHistory: true })}
-                    disabled={isLoading || isLoadingHistory}
-                  >
-                    See More ({conversations.length - 2} more)
-                  </button>
-                )}
-
-                {/* Show Less Button */}
-                {this.state.showAllHistory && conversations.length > 2 && (
-                  <button 
-                    className="see-more-button"
-                    onClick={() => this.setState({ showAllHistory: false })}
-                  >
-                    Show Less
-                  </button>
-                )}
-                </div>
-              )}
-            </div>
-          )}
+          {/* Bottom history panel removed; history is now in header */}
         </div>
       </div>
     );
