@@ -2092,6 +2092,10 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
             isLoadingModels={isLoadingModels}
             onModelChange={this.handleModelChange}
             showModelSelection={showModelSelection}
+            personas={personas}
+            selectedPersona={selectedPersona}
+            onPersonaChange={this.handlePersonaChange}
+            showPersonaSelection={showPersonaSelection}
             conversations={[]} // Empty for now, moved below
             selectedConversation={selectedConversation}
             onConversationSelect={this.handleConversationSelect}
@@ -2149,7 +2153,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
                 selectedPersona={selectedPersona}
                 onPersonaChange={this.handlePersonaChange}
                 onPersonaToggle={this.handlePersonaToggle}
-                showPersonaSelection={true} // Always show persona selection
+                showPersonaSelection={false} // Moved to header
               />
             </>
           )}

@@ -3,7 +3,8 @@
 /* Redesigned Chat Header Styles */
 .chat-header-redesigned {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  /* Allow Model and Persona to sit side-by-side before the flexible spacer */
+  grid-template-columns: auto auto 1fr auto;
   align-items: flex-start;
   padding: 1rem 1.25rem;
   border-bottom: 1px solid var(--border-color);
