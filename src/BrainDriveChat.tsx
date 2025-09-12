@@ -1746,10 +1746,14 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     this.setState({ inputText: e.target.value });
     
-    // Auto-resize the textarea
+    // Auto-resize the textarea: 1 → 4 lines, then scroll
     if (this.inputRef.current) {
-      this.inputRef.current.style.height = 'auto';
-      this.inputRef.current.style.height = `${Math.min(this.inputRef.current.scrollHeight, 150)}px`;
+      const ta = this.inputRef.current;
+      ta.style.height = 'auto';
+      const computed = window.getComputedStyle(ta);
+      const lineHeight = parseFloat(computed.lineHeight || '0') || 24; // fallback if not computable
+      const maxHeight = lineHeight * 4; // 4 lines max
+      ta.style.height = `${Math.min(ta.scrollHeight, maxHeight)}px`;
     }
   };
 

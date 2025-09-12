@@ -1,13 +1,6 @@
 import React from 'react';
 import { ModelInfo } from '../types';
-import {
-    SendIcon,
-    StopIcon,
-    ThreeDotsIcon,
-    FileIcon,
-    SearchIcon,
-    PersonaIcon
-  } from '../icons';
+import { SendIcon, StopIcon } from '../icons';
 
 interface ChatInputProps {
   inputText: string;
@@ -37,6 +30,7 @@ interface ChatInputProps {
 interface ChatInputState {
   isMenuOpen: boolean;
   showPersonaSelector: boolean;
+  isMultiline: boolean;
 }
 
 class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
@@ -46,7 +40,8 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
     super(props);
     this.state = {
       isMenuOpen: false,
-      showPersonaSelector: false
+      showPersonaSelector: false,
+      isMultiline: false
     };
   }
 
@@ -58,6 +53,9 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
     
     // The persona selector should be disabled by default and only shown when user toggles it
     // Don't automatically enable it even if there's a selected persona
+
+    // Initialize multiline state
+    this.updateMultilineState();
   }
 
   componentDidUpdate(prevProps: ChatInputProps) {
@@ -76,6 +74,11 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
         this.setState({ showPersonaSelector: false });
       }
     }
+
+    // Update multiline state when text changes
+    if (prevProps.inputText !== this.props.inputText) {
+      this.updateMultilineState();
+    }
   }
 
   componentWillUnmount() {
@@ -86,6 +89,25 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
     if (this.menuRef.current && !this.menuRef.current.contains(event.target as Node)) {
       this.setState({ isMenuOpen: false });
     }
+  };
+
+  // Determine if the textarea has grown beyond one line to adjust button alignment
+  updateMultilineState = () => {
+    const ta = this.props.inputRef?.current;
+    if (!ta) return;
+    const computed = window.getComputedStyle(ta);
+    const lineHeight = parseFloat(computed.lineHeight || '0') || 24;
+    const isMulti = ta.scrollHeight > lineHeight * 1.6; // a bit above 1 line to avoid flicker
+    if (isMulti !== this.state.isMultiline) {
+      this.setState({ isMultiline: isMulti });
+    }
+  };
+
+  handleInputChangeProxy = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    // Call upstream handler first
+    this.props.onInputChange(e);
+    // Then recompute alignment in the next frame
+    requestAnimationFrame(this.updateMultilineState);
   };
 
   toggleMenu = () => {
@@ -144,90 +166,47 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
       showPersonaSelection
     } = this.props;
 
-    const { isMenuOpen, showPersonaSelector } = this.state;
+    // Local dropdown state retained for future menu use; not used in current layout
     
     return (
       <div className="chat-input-container">
         <div className="chat-input-wrapper">
           <div className="input-with-buttons">
-            <textarea
-              ref={inputRef}
-              value={inputText}
-              onChange={onInputChange}
-              onKeyPress={onKeyPress}
-              placeholder={promptQuestion || "Type your message here..."}
-              className="chat-input"
-              disabled={isLoading || isLoadingHistory}
-              rows={3}
-            />
-            
-            {/* Bottom button row inside textarea */}
-            <div className="input-buttons-row">
-              {/* Left side buttons */}
-              <div className="input-buttons-left">
-                {/* More button temporarily disabled for production release */}
-                {/* <div className="menu-container" ref={this.menuRef}>
-                  <button
-                    onClick={this.toggleMenu}
-                    disabled={isLoading || isLoadingHistory || isStreaming}
-                    className="input-button menu-button"
-                    title="More options"
-                  >
-                    <ThreeDotsIcon />
-                  </button>
-                  
-                  {isMenuOpen && (
-                    <div className="dropdown-menu">
-                      <button
-                        onClick={this.handleFileUpload}
-                        className="menu-item"
-                        disabled={isLoading || isLoadingHistory || isStreaming}
-                      >
-                        <FileIcon />
-                        <span>Upload Documents</span>
-                      </button>
-                      <button
-                        onClick={this.handleWebSearchToggle}
-                        className={`menu-item ${useWebSearch ? 'active' : ''}`}
-                        disabled={isLoading || isLoadingHistory}
-                      >
-                        <SearchIcon isActive={useWebSearch} />
-                        <span>Web Search {useWebSearch ? 'On' : 'Off'}</span>
-                      </button>
-                      {showPersonaSelection && (
-                        <button
-                          onClick={this.handlePersonaToggle}
-                          className={`menu-item ${showPersonaSelector ? 'active' : ''}`}
-                          disabled={isLoading || isLoadingHistory}
-                        >
-                          <PersonaIcon />
-                          <span>Persona {showPersonaSelector ? 'On' : 'Off'}</span>
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div> */}
+            <div className={`chat-input-row ${this.state.isMultiline ? 'multiline' : ''}`}>
+              {/* Persona Selector - optional left control */}
+              {showPersonaSelection && (
+                <select
+                  value={selectedPersona?.id || ''}
+                  onChange={onPersonaChange}
+                  className="persona-selector"
+                  disabled={isLoading || isLoadingHistory}
+                  title="Select persona"
+                >
+                  <option value="">No Persona</option>
+                  {personas.map((persona: any) => (
+                    <option key={persona.id} value={persona.id}>
+                      {persona.name}
+                    </option>
+                  ))}
+                </select>
+              )}
 
-                {/* Persona Selector - always shown when personas are available */}
-                {showPersonaSelection && (
-                  <select
-                    value={selectedPersona?.id || ''}
-                    onChange={onPersonaChange}
-                    className="persona-selector"
-                    disabled={isLoading || isLoadingHistory}
-                    title="Select persona"
-                  >
-                    <option value="">No Persona</option>
-                    {personas.map((persona: any) => (
-                      <option key={persona.id} value={persona.id}>
-                        {persona.name}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
+              <textarea
+                ref={inputRef}
+                value={inputText}
+                onChange={this.handleInputChangeProxy}
+                onKeyDown={(e) => {
+                  onKeyPress(e);
+                  // Also recompute alignment after key handling (e.g., Enter)
+                  requestAnimationFrame(this.updateMultilineState);
+                }}
+                placeholder={promptQuestion || "Type your message here..."}
+                className="chat-input"
+                disabled={isLoading || isLoadingHistory}
+                rows={1}
+              />
 
-              {/* Send Button - Bottom Right */}
+              {/* Send/Stop Button - right aligned */}
               <button
                 onClick={isStreaming ? onStopGeneration : onSendMessage}
                 disabled={(!inputText.trim() && !isStreaming) || isLoadingHistory || !selectedModel}
