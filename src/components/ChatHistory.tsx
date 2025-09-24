@@ -31,6 +31,7 @@ interface ChatHistoryProps {
   showScrollToBottom?: boolean;
   onScrollToBottom?: () => void;
   onToggleMarkdown?: (messageId: string) => void;
+  onScroll?: (event: React.UIEvent<HTMLDivElement>) => void;
 }
 
 interface ChatHistoryState {
@@ -507,6 +508,7 @@ class ChatHistory extends React.Component<ChatHistoryProps, ChatHistoryState> {
         <div 
           ref={chatHistoryRef}
           className="chat-history"
+          onScroll={this.props.onScroll}
         >
           {/* Show error if any */}
           {this.renderError()}

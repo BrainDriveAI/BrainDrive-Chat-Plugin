@@ -466,28 +466,28 @@
 /* Scroll to bottom button */
 .scroll-to-bottom-button {
   position: absolute;
-  bottom: 1rem;
-  right: 1rem;
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
+  bottom: 0.75rem;
+  right: 0.35rem;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
   background-color: var(--button-primary-bg);
   color: var(--button-primary-text);
-  border: none;
+  border: 1px solid var(--border-color);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: var(--shadow-lg);
-  transition: all 0.2s ease;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+  transition: transform 0.2s ease, opacity 0.2s ease;
   z-index: 10;
-  opacity: 0.9;
+  opacity: 0.85;
 }
 
 .scroll-to-bottom-button:hover {
   opacity: 1;
   transform: translateY(-2px);
-  box-shadow: var(--shadow-xl);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
 }
 
 .scroll-to-bottom-button:active {

@@ -143,11 +143,9 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     // Add click outside listener to close conversation menu
     document.addEventListener('mousedown', this.handleClickOutside);
     
-    // Add scroll event listener to track scroll position
-    if (this.chatHistoryRef.current) {
-      this.chatHistoryRef.current.addEventListener('scroll', this.handleScroll);
-    }
-    
+    // Initialize scroll state
+    this.updateScrollState();
+
     // Set initialization timeout
     setTimeout(() => {
       if (!this.state.conversation_id) {
@@ -181,8 +179,8 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   }
 
   componentDidUpdate(prevProps: BrainDriveChatProps, prevState: BrainDriveChatState) {
-    // Scroll to bottom when new messages are added
-    if (prevState.messages.length !== this.state.messages.length) {
+    // Only auto-scroll when the user was already near the bottom
+    if (prevState.messages.length !== this.state.messages.length && prevState.isNearBottom) {
       this.debouncedScrollToBottom();
     }
   }
@@ -203,11 +201,6 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     
     // Clean up click outside listener
     document.removeEventListener('mousedown', this.handleClickOutside);
-    
-    // Clean up scroll event listener
-    if (this.chatHistoryRef.current) {
-      this.chatHistoryRef.current.removeEventListener('scroll', this.handleScroll);
-    }
     
     // Clean up any ongoing streaming
     if (this.currentStreamingAbortController) {
@@ -1683,10 +1676,11 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
    */
   isUserNearBottom = () => {
     if (!this.chatHistoryRef.current) return true;
-    
+
     const { scrollTop, scrollHeight, clientHeight } = this.chatHistoryRef.current;
-    const threshold = 100; // pixels from bottom
-    return scrollTop + clientHeight >= scrollHeight - threshold;
+    const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
+    const threshold = 12; // pixels from bottom before we consider the user "at" the bottom
+    return distanceFromBottom <= threshold;
   };
 
   /**
@@ -1694,11 +1688,17 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
    */
   updateScrollState = () => {
     const isNearBottom = this.isUserNearBottom();
-    const showScrollToBottom = !isNearBottom && this.state.isStreaming;
-    
-    this.setState({
-      isNearBottom,
-      showScrollToBottom
+    const showScrollToBottom = !isNearBottom;
+
+    this.setState(prevState => {
+      if (prevState.isNearBottom === isNearBottom && prevState.showScrollToBottom === showScrollToBottom) {
+        return null;
+      }
+
+      return {
+        isNearBottom,
+        showScrollToBottom
+      };
     });
   };
 
@@ -1924,6 +1924,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       
       // Handle streaming chunks
       const onChunk = (chunk: string) => {
+        const wasNearBottom = this.state.isNearBottom || this.isUserNearBottom();
         currentResponseContent += chunk;
         this.setState(prevState => {
           const updatedMessages = prevState.messages.map(message => {
@@ -1938,11 +1939,9 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
           
           return { ...prevState, messages: updatedMessages };
         }, () => {
-          // Only auto-scroll if user is near the bottom
-          if (this.isUserNearBottom()) {
+          if (wasNearBottom) {
             this.scrollToBottom();
           } else {
-            // Update scroll state to show scroll-to-bottom button
             this.updateScrollState();
           }
         });
@@ -1977,6 +1976,8 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         this.currentStreamingAbortController
       );
       
+      const shouldScrollToBottom = this.state.isNearBottom || this.isUserNearBottom();
+
       // Finalize the message
       this.setState(prevState => {
         console.log('✅ Finalizing message with ID:', placeholderId);
@@ -2004,7 +2005,11 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         };
       }, () => {
         console.log(`✅ Message finalized. Total messages: ${this.state.messages.length}`);
-        this.scrollToBottom();
+        if (shouldScrollToBottom) {
+          this.scrollToBottom();
+        } else {
+          this.updateScrollState();
+        }
         // Focus the input box after response is completed
         this.focusInput();
         
@@ -2128,6 +2133,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
                   showScrollToBottom={this.state.showScrollToBottom}
                   onScrollToBottom={this.scrollToBottom}
                   onToggleMarkdown={this.toggleMarkdownView}
+                  onScroll={this.handleScroll}
                 />
               </div>
               
