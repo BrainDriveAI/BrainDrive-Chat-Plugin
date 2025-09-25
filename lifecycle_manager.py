@@ -116,8 +116,8 @@ class BrainDriveChatLifecycleManager(BaseLifecycleManager):
             "plugin_slug": "BrainDriveChat",
             # Update tracking fields (matching plugin model)
             "source_type": "github",
-            "source_url": "https://github.com/DJJones66/BrainDriveChat",
-            "update_check_url": "https://api.github.com/repos/DJJones66/BrainDriveChat/releases/latest",
+            "source_url": "https://github.com/BrainDriveAI/BrainDrive-Chat-Plugin",
+            "update_check_url": "https://github.com/BrainDriveAI/BrainDrive-Chat-Plugin/releases/latest",
             "last_update_check": None,
             "update_available": False,
             "latest_version": None,
