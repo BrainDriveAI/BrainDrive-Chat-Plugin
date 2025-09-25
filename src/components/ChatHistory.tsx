@@ -31,6 +31,7 @@ interface ChatHistoryProps {
   showScrollToBottom?: boolean;
   onScrollToBottom?: () => void;
   onToggleMarkdown?: (messageId: string) => void;
+  onScroll?: (event: React.UIEvent<HTMLDivElement>) => void;
 }
 
 interface ChatHistoryState {
@@ -229,14 +230,32 @@ class ChatHistory extends React.Component<ChatHistoryProps, ChatHistoryState> {
     // Handle thinking tags in content
     const { sender, content, timestamp, isStreaming, isEditable, isEdited, canRegenerate, canContinue, showRawMarkdown } = message;
     
-    // Check if content contains thinking tags
-    const thinkingMatch = content.match(/<think>([\s\S]*?)<\/think>/);
+    // Check if content contains thinking tags; handle streaming without closing tag
+    const THINK_OPEN_TAG = '<think>';
+    const THINK_CLOSE_TAG = '</think>';
+    const thinkStartIndex = content.indexOf(THINK_OPEN_TAG);
+
     let displayContent = content;
-    let thinkingContent = null;
-    
-    if (thinkingMatch) {
-      thinkingContent = thinkingMatch[1];
-      displayContent = content.replace(/<think>[\s\S]*?<\/think>/, '').trim();
+    let thinkingContent: string | null = null;
+
+    if (thinkStartIndex !== -1) {
+      const beforeThink = content.slice(0, thinkStartIndex);
+      const afterOpenTag = content.slice(thinkStartIndex + THINK_OPEN_TAG.length);
+      const thinkEndIndex = afterOpenTag.indexOf(THINK_CLOSE_TAG);
+
+      if (thinkEndIndex !== -1) {
+        thinkingContent = afterOpenTag.slice(0, thinkEndIndex);
+        const afterThink = afterOpenTag.slice(thinkEndIndex + THINK_CLOSE_TAG.length);
+        displayContent = `${beforeThink}${afterThink}`;
+      } else {
+        thinkingContent = afterOpenTag;
+        displayContent = beforeThink;
+      }
+
+      displayContent = displayContent.trim();
+      if (thinkingContent !== null) {
+        thinkingContent = thinkingContent.trim();
+      }
     }
     const messageClass = `message message-${sender}`;
     const isEditing = this.props.editingMessageId === message.id;
@@ -245,7 +264,7 @@ class ChatHistory extends React.Component<ChatHistoryProps, ChatHistoryState> {
       <div key={message.id} className={messageClass}>
         <div className="message-content">
           {/* Render thinking block if present */}
-          {thinkingContent && (
+          {thinkingContent !== null && (
             <ThinkingBlock>
               {thinkingContent}
             </ThinkingBlock>
@@ -489,6 +508,7 @@ class ChatHistory extends React.Component<ChatHistoryProps, ChatHistoryState> {
         <div 
           ref={chatHistoryRef}
           className="chat-history"
+          onScroll={this.props.onScroll}
         >
           {/* Show error if any */}
           {this.renderError()}

@@ -32,7 +32,7 @@ class ThinkingBlock extends React.Component<ThinkingBlockProps, ThinkingBlockSta
     return (
       <div className={`thinking-block ${isExpanded ? 'expanded' : 'collapsed'}`}>
         <div className="thinking-header" onClick={this.toggleExpanded}>
-          <span>Thinking Process</span>
+          <span>Thinking Process!</span>
           <span className="thinking-toggle">
             {isExpanded ? '▼' : '▶'}
           </span>
