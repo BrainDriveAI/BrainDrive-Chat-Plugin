@@ -59,6 +59,7 @@ export interface ModelInfo {
   providerId: string;
   serverName: string;
   serverId: string;
+  isTemporary?: boolean;
 }
 
 // Persona information
@@ -212,6 +213,8 @@ export interface BrainDriveChatState {
   error: string;
   currentTheme: string;
   selectedModel: ModelInfo | null;
+  pendingModelKey: string | null;
+  pendingModelSnapshot: ModelInfo | null;
   useStreaming: boolean;
   conversation_id: string | null;
   isLoadingHistory: boolean;
@@ -227,6 +230,7 @@ export interface BrainDriveChatState {
   // Persona-related state
   personas: PersonaInfo[];
   selectedPersona: PersonaInfo | null;
+  pendingPersonaId: string | null;
   isLoadingPersonas: boolean;
   showPersonaSelection: boolean;
   // Web search state

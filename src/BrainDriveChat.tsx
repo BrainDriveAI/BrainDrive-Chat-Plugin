@@ -62,6 +62,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   private menuButtonRef: HTMLButtonElement | null = null;
   private readonly SCROLL_ANCHOR_OFFSET = -420;
   private isProgrammaticScroll = false;
+  private pendingPersonaRequestId: string | null = null;
 
   constructor(props: BrainDriveChatProps) {
     super(props);
@@ -74,6 +75,8 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       error: '',
       currentTheme: 'light',
       selectedModel: null,
+      pendingModelKey: null,
+      pendingModelSnapshot: null,
       useStreaming: true, // Always use streaming
       conversation_id: null,
       isLoadingHistory: false,
@@ -96,6 +99,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       // Persona state
       personas: props.availablePersonas || [],
       selectedPersona: null, // Default to no persona
+      pendingPersonaId: null,
       isLoadingPersonas: !props.availablePersonas,
       showPersonaSelection: true, // Always show persona selection
       
@@ -187,6 +191,24 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   }
 
   componentDidUpdate(prevProps: BrainDriveChatProps, prevState: BrainDriveChatState) {
+    if (
+      prevState.models !== this.state.models ||
+      prevState.pendingModelKey !== this.state.pendingModelKey ||
+      prevState.pendingModelSnapshot !== this.state.pendingModelSnapshot ||
+      prevState.selectedModel !== this.state.selectedModel
+    ) {
+      this.resolvePendingModelSelection();
+    }
+
+    if (
+      prevState.personas !== this.state.personas ||
+      prevState.pendingPersonaId !== this.state.pendingPersonaId ||
+      prevState.selectedPersona !== this.state.selectedPersona ||
+      prevState.showPersonaSelection !== this.state.showPersonaSelection
+    ) {
+      this.resolvePendingPersonaSelection();
+    }
+
     const messagesChanged = prevState.messages !== this.state.messages;
     if (!messagesChanged) {
       return;
@@ -411,9 +433,10 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
           if (this.props.availablePersonas) {
         // Use provided personas
         console.log(`🎭 Using provided personas: ${this.props.availablePersonas.map((p: any) => p.name).join(', ')}`);
+        this.resolvePendingPersonaSelection();
         return;
       }
-    
+
     this.setState({ isLoadingPersonas: true });
     
     try {
@@ -424,15 +447,21 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         this.setState({
           personas: personas,
           isLoadingPersonas: false
+        }, () => {
+          this.resolvePendingPersonaSelection();
         });
       } else {
-        this.setState({ isLoadingPersonas: false });
+        this.setState({ isLoadingPersonas: false }, () => {
+          this.resolvePendingPersonaSelection();
+        });
       }
     } catch (error) {
       console.error('Error loading personas:', error);
       this.setState({
         personas: [],
         isLoadingPersonas: false
+      }, () => {
+        this.resolvePendingPersonaSelection();
       });
     }
   };
@@ -475,12 +504,30 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         : [];
 
       if (models.length > 0) {
-        this.setState({
-          models,
-          isLoadingModels: false,
-          selectedModel: models[0],
+        const shouldBroadcastDefault = !this.state.pendingModelKey && !this.state.selectedModel;
+
+        this.setState(prevState => {
+          if (!prevState.pendingModelKey && !prevState.selectedModel && models.length > 0) {
+            return {
+              models,
+              isLoadingModels: false,
+              selectedModel: models[0],
+            };
+          }
+
+          return {
+            models,
+            isLoadingModels: false,
+            selectedModel: prevState.selectedModel,
+          };
+        }, () => {
+          if (this.state.pendingModelKey) {
+            this.resolvePendingModelSelection();
+          } else if (shouldBroadcastDefault && this.state.selectedModel) {
+            this.broadcastModelSelection(this.state.selectedModel);
+          }
         });
-        this.broadcastModelSelection(models[0]);
+
         return;
       }
 
@@ -533,12 +580,42 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
           }
         }
 
+        if (fallbackModels.length > 0) {
+          const shouldBroadcastDefault = !this.state.pendingModelKey && !this.state.selectedModel;
+
+          this.setState(prevState => {
+            if (!prevState.pendingModelKey && !prevState.selectedModel && fallbackModels.length > 0) {
+              return {
+                models: fallbackModels,
+                isLoadingModels: false,
+                selectedModel: fallbackModels[0],
+              };
+            }
+
+            return {
+              models: fallbackModels,
+              isLoadingModels: false,
+              selectedModel: prevState.selectedModel,
+            };
+          }, () => {
+            if (this.state.pendingModelKey) {
+              this.resolvePendingModelSelection();
+            } else if (shouldBroadcastDefault && this.state.selectedModel) {
+              this.broadcastModelSelection(this.state.selectedModel);
+            }
+          });
+
+          return;
+        }
+
         this.setState({
           models: fallbackModels,
           isLoadingModels: false,
-          selectedModel: fallbackModels.length > 0 ? fallbackModels[0] : null,
+        }, () => {
+          if (this.state.pendingModelKey) {
+            this.resolvePendingModelSelection();
+          }
         });
-        if (fallbackModels.length > 0) this.broadcastModelSelection(fallbackModels[0]);
         return;
       } catch (fallbackErr) {
         console.error('Fallback: error loading Ollama settings/models:', fallbackErr);
@@ -804,7 +881,11 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     );
     
     if (selectedModel) {
-      this.setState({ selectedModel }, () => {
+      this.setState({
+        selectedModel,
+        pendingModelKey: null,
+        pendingModelSnapshot: null
+      }, () => {
         this.broadcastModelSelection(selectedModel);
       });
     }
@@ -817,7 +898,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     if (!this.props.services?.event) {
       return;
     }
-    
+
     // Create model selection message
     const modelInfo = {
       type: 'model.selection',
@@ -835,6 +916,158 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     
     // Send to event system
     this.props.services.event.sendMessage('ai-prompt-chat', modelInfo.content);
+  };
+
+  private getModelKey(modelName?: string | null, serverName?: string | null) {
+    const safeModel = (modelName || '').trim();
+    const safeServer = (serverName || '').trim();
+    return `${safeServer}:::${safeModel}`;
+  }
+
+  private getModelKeyFromInfo(model: ModelInfo | null) {
+    if (!model) {
+      return '';
+    }
+    return this.getModelKey(model.name, model.serverName);
+  }
+
+  private resolvePendingModelSelection = () => {
+    const { pendingModelKey, models, selectedModel, pendingModelSnapshot } = this.state;
+
+    if (!pendingModelKey) {
+      if (pendingModelSnapshot) {
+        this.setState({ pendingModelSnapshot: null });
+      }
+      return;
+    }
+
+    const matchingModel = models.find(model => this.getModelKeyFromInfo(model) === pendingModelKey);
+
+    if (matchingModel) {
+      const selectedKey = this.getModelKeyFromInfo(selectedModel);
+      const isSameKey = selectedKey === pendingModelKey;
+      const selectedIsTemporary = Boolean(selectedModel?.isTemporary);
+      const matchingIsTemporary = Boolean(matchingModel.isTemporary);
+
+      if (!selectedModel || !isSameKey || (selectedIsTemporary && !matchingIsTemporary)) {
+        this.setState({
+          selectedModel: matchingModel,
+          pendingModelKey: matchingIsTemporary ? pendingModelKey : null,
+          pendingModelSnapshot: matchingIsTemporary ? pendingModelSnapshot : null
+        }, () => {
+          if (!matchingIsTemporary) {
+            this.broadcastModelSelection(matchingModel);
+          }
+        });
+        return;
+      }
+
+      if (!matchingIsTemporary) {
+        this.setState({ pendingModelKey: null, pendingModelSnapshot: null });
+      }
+
+      return;
+    }
+
+    if (pendingModelSnapshot && !models.some(model => this.getModelKeyFromInfo(model) === pendingModelKey)) {
+      this.setState(prevState => ({
+        models: [...prevState.models, pendingModelSnapshot]
+      }));
+    }
+  };
+
+  private resolvePendingPersonaSelection = () => {
+    const { pendingPersonaId, showPersonaSelection, personas, selectedPersona } = this.state;
+
+    if (!showPersonaSelection) {
+      if (pendingPersonaId) {
+        this.setState({ pendingPersonaId: null });
+      }
+      return;
+    }
+
+    if (!pendingPersonaId) {
+      return;
+    }
+
+    const normalizedPendingId = `${pendingPersonaId}`;
+
+    if (selectedPersona && `${selectedPersona.id}` === normalizedPendingId) {
+      this.setState({ pendingPersonaId: null });
+      return;
+    }
+
+    const existingPersona = personas.find(persona => `${persona.id}` === normalizedPendingId);
+    if (existingPersona) {
+      this.setState({
+        selectedPersona: existingPersona,
+        pendingPersonaId: null
+      });
+      return;
+    }
+
+    if (!this.props.services?.api) {
+      return;
+    }
+
+    if (this.pendingPersonaRequestId === normalizedPendingId) {
+      return;
+    }
+
+    this.pendingPersonaRequestId = normalizedPendingId;
+
+    this.fetchPersonaById(normalizedPendingId)
+      .then(persona => {
+        if (!persona) {
+          return;
+        }
+
+        const personaId = `${persona.id}`;
+
+        if (!this.state.pendingPersonaId || `${this.state.pendingPersonaId}` !== personaId) {
+          return;
+        }
+
+        this.setState(prevState => {
+          const alreadyExists = prevState.personas.some(p => `${p.id}` === personaId);
+          const personasList = alreadyExists
+            ? prevState.personas
+            : [...prevState.personas, { ...persona, id: personaId }];
+
+          return {
+            personas: personasList,
+            selectedPersona: personasList.find(p => `${p.id}` === personaId) || null,
+            pendingPersonaId: null
+          };
+        });
+      })
+      .catch(error => {
+        console.error('Error resolving pending persona:', error);
+      })
+      .finally(() => {
+        this.pendingPersonaRequestId = null;
+      });
+  };
+
+  private fetchPersonaById = async (personaId: string): Promise<PersonaInfo | null> => {
+    if (!this.props.services?.api) {
+      return null;
+    }
+
+    try {
+      const response = await this.props.services.api.get(`/api/v1/personas/${personaId}`);
+      const personaCandidate: any = response?.persona || response?.data || response;
+      if (personaCandidate && personaCandidate.id) {
+        return {
+          ...personaCandidate,
+          id: `${personaCandidate.id}`
+        } as PersonaInfo;
+      }
+    } catch (error) {
+      console.error('Error fetching persona by id:', error);
+    }
+
+    return null;
   };
 
   /**
@@ -875,7 +1108,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     
     console.log(`🎭 Persona changed: ${selectedPersona?.name || 'none'} (ID: ${personaId || 'none'})`);
     
-    this.setState({ selectedPersona }, () => {
+    this.setState({ selectedPersona, pendingPersonaId: null }, () => {
       console.log(`🎭 Persona state after change: selectedPersona=${this.state.selectedPersona?.name || 'null'}, showPersonaSelection=${this.state.showPersonaSelection}`);
     });
 
@@ -896,7 +1129,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   handlePersonaToggle = () => {
     // Reset to no persona when toggling off
     console.log('🎭 Persona toggled off - resetting to no persona');
-    this.setState({ selectedPersona: null }, () => {
+    this.setState({ selectedPersona: null, pendingPersonaId: null }, () => {
       console.log(`🎭 Persona state after toggle: selectedPersona=${this.state.selectedPersona?.name || 'null'}, showPersonaSelection=${this.state.showPersonaSelection}`);
     });
   };
@@ -911,7 +1144,10 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       conversation_id: null,
       messages: [],
       // Reset persona to null when starting new chat (respects persona toggle state)
-      selectedPersona: this.state.showPersonaSelection ? this.state.selectedPersona : null
+      selectedPersona: this.state.showPersonaSelection ? this.state.selectedPersona : null,
+      pendingModelKey: null,
+      pendingModelSnapshot: null,
+      pendingPersonaId: null
     }, () => {
       console.log(`✅ New chat started - conversation_id: ${this.state.conversation_id}`);
       // Only use persona greeting if persona selection is enabled and a persona is selected
@@ -1188,54 +1424,100 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         conversationWithPersona = selectedConversation;
       }
       
-      // Restore persona selection only if personas are enabled
-      if (this.state.showPersonaSelection && conversationWithPersona?.persona) {
-        const persona = conversationWithPersona.persona;
-        // Check if this persona exists in our current personas list
-        const existingPersona = this.state.personas.find(p => p.id === persona.id);
-        if (existingPersona) {
-          this.setState({ selectedPersona: existingPersona });
-        } else {
-          // Add the persona to our list if it's not there
-          this.setState(prevState => ({
-            personas: [...prevState.personas, persona],
-            selectedPersona: persona
-          }));
-        }
-      } else if (this.state.showPersonaSelection && conversationWithPersona?.persona_id) {
-        // If we have a persona_id but no full persona data, try to find it in our list
-        const existingPersona = this.state.personas.find(p => p.id === conversationWithPersona.persona_id);
-        if (existingPersona) {
-          this.setState({ selectedPersona: existingPersona });
-        }
-      } else {
-        // Ensure persona is reset to null when personas are disabled
-        this.setState({ selectedPersona: null });
-      }
-      
-      // Restore model selection from conversation data
-      if (conversationWithPersona?.model && conversationWithPersona?.server) {
-        // Find the matching model in our models list
-        const matchingModel = this.state.models.find(model =>
-          model.name === conversationWithPersona.model &&
-          model.serverName === conversationWithPersona.server
-        );
-        
+      const showPersonaSelection = this.state.showPersonaSelection;
+      const personaFromConversation = showPersonaSelection && conversationWithPersona?.persona
+        ? { ...conversationWithPersona.persona, id: `${conversationWithPersona.persona.id}` }
+        : null;
+      const personaIdFromConversation = showPersonaSelection
+        ? (personaFromConversation?.id
+          || (conversationWithPersona?.persona_id ? `${conversationWithPersona.persona_id}` : null))
+        : null;
+      const pendingPersonaId = personaIdFromConversation && personaIdFromConversation.trim() !== ''
+        ? personaIdFromConversation
+        : null;
+
+      const modelName = conversationWithPersona?.model?.trim();
+      const serverName = conversationWithPersona?.server?.trim();
+      const hasModelMetadata = Boolean(modelName && serverName);
+
+      const pendingModelKey = hasModelMetadata
+        ? this.getModelKey(modelName, serverName)
+        : null;
+      const matchingModel = pendingModelKey
+        ? this.state.models.find(model => this.getModelKeyFromInfo(model) === pendingModelKey)
+        : null;
+      const pendingModelSnapshot = pendingModelKey && !matchingModel && hasModelMetadata
+        ? {
+            name: modelName!,
+            provider: 'ollama',
+            providerId: 'ollama_servers_settings',
+            serverName: serverName!,
+            serverId: 'unknown',
+            isTemporary: true
+          } as ModelInfo
+        : null;
+
+      const previousSelectedModelKey = this.getModelKeyFromInfo(this.state.selectedModel);
+
+      this.setState(prevState => {
+        const nextState: Partial<BrainDriveChatState> = {
+          pendingModelKey,
+          pendingModelSnapshot,
+          pendingPersonaId,
+        };
+
         if (matchingModel) {
-          this.setState({ selectedModel: matchingModel });
-        } else {
-          // If we can't find the exact model, create a temporary model object
-          // This handles cases where the model might not be in the current list
-          const tempModel: ModelInfo = {
-            name: conversationWithPersona.model,
-            provider: 'ollama', // Default provider
-            providerId: 'ollama_servers_settings', // Default provider ID
-            serverName: conversationWithPersona.server,
-            serverId: 'unknown' // We don't have the server ID from conversation data
-          };
-          this.setState({ selectedModel: tempModel });
+          nextState.selectedModel = matchingModel;
+        } else if (pendingModelSnapshot) {
+          nextState.selectedModel = pendingModelSnapshot;
+        } else if (!pendingModelKey) {
+          nextState.pendingModelKey = null;
+          nextState.pendingModelSnapshot = null;
         }
-      }
+
+        if (showPersonaSelection) {
+          if (personaFromConversation) {
+            const existingPersona = prevState.personas.find(p => `${p.id}` === personaFromConversation.id);
+            if (existingPersona) {
+              nextState.selectedPersona = existingPersona;
+            } else {
+              nextState.personas = [...prevState.personas, personaFromConversation];
+              nextState.selectedPersona = personaFromConversation;
+            }
+          } else if (pendingPersonaId) {
+            nextState.pendingPersonaId = pendingPersonaId;
+            const existingPersona = prevState.personas.find(p => `${p.id}` === pendingPersonaId);
+            nextState.selectedPersona = existingPersona || null;
+          } else {
+            nextState.selectedPersona = null;
+            nextState.pendingPersonaId = null;
+          }
+        } else {
+          nextState.selectedPersona = null;
+          nextState.pendingPersonaId = null;
+        }
+
+        return nextState as Pick<BrainDriveChatState, keyof BrainDriveChatState>;
+      }, () => {
+        const newSelectedModelKey = this.getModelKeyFromInfo(this.state.selectedModel);
+        if (
+          (matchingModel || pendingModelSnapshot) &&
+          newSelectedModelKey &&
+          newSelectedModelKey !== previousSelectedModelKey
+        ) {
+          const currentModel = this.state.selectedModel;
+          if (currentModel) {
+            this.broadcastModelSelection(currentModel);
+          }
+        }
+
+        if (pendingModelKey) {
+          this.resolvePendingModelSelection();
+        }
+        if (this.state.pendingPersonaId) {
+          this.resolvePendingPersonaSelection();
+        }
+      });
       
       // Now load the conversation messages using the regular method
       await this.loadConversationHistory(conversationId);
