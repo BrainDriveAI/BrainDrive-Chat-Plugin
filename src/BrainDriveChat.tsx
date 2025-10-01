@@ -38,6 +38,11 @@ import { AIService, SearchService, DocumentService } from './services';
 // Import icons
 // Icons previously used in the bottom history panel are no longer needed here
 
+type ScrollToBottomOptions = {
+  behavior?: ScrollBehavior;
+  manual?: boolean;
+};
+
 /**
  * Unified BrainDriveChat component that combines AI chat, model selection, and conversation history
  */
@@ -49,12 +54,14 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   private currentPageContext: any = null;
   private readonly STREAMING_SETTING_KEY = SETTINGS_KEYS.STREAMING;
   private initialGreetingAdded = false;
-  private debouncedScrollToBottom: () => void;
+  private debouncedScrollToBottom: (options?: ScrollToBottomOptions) => void;
   private aiService: AIService | null = null;
   private searchService: SearchService | null = null;
   private documentService: DocumentService | null = null;
   private currentStreamingAbortController: AbortController | null = null;
   private menuButtonRef: HTMLButtonElement | null = null;
+  private readonly SCROLL_ANCHOR_OFFSET = -420;
+  private isProgrammaticScroll = false;
 
   constructor(props: BrainDriveChatProps) {
     super(props);
@@ -108,6 +115,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       // Scroll state
       isNearBottom: true,
       showScrollToBottom: false,
+      isAutoScrollLocked: false,
       
       // History UI state
       showAllHistory: false,
@@ -116,7 +124,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     };
     
     // Bind methods
-    this.debouncedScrollToBottom = debounce(this.scrollToBottom.bind(this), UI_CONFIG.SCROLL_DEBOUNCE_DELAY);
+    this.debouncedScrollToBottom = debounce((options?: ScrollToBottomOptions) => this.scrollToBottom(options), UI_CONFIG.SCROLL_DEBOUNCE_DELAY);
     
     // Initialize AI service
     this.aiService = new AIService(props.services);
@@ -179,9 +187,17 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   }
 
   componentDidUpdate(prevProps: BrainDriveChatProps, prevState: BrainDriveChatState) {
-    // Only auto-scroll when the user was already near the bottom
-    if (prevState.messages.length !== this.state.messages.length && prevState.isNearBottom) {
+    const messagesChanged = prevState.messages !== this.state.messages;
+    if (!messagesChanged) {
+      return;
+    }
+
+    const messageCountIncreased = this.state.messages.length > prevState.messages.length;
+
+    if (!this.state.isAutoScrollLocked && messageCountIncreased) {
       this.debouncedScrollToBottom();
+    } else {
+      this.updateScrollState();
     }
   }
 
@@ -1674,30 +1690,47 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   /**
    * Check if user is near the bottom of the chat
    */
-  isUserNearBottom = () => {
+  isUserNearBottom = (threshold: number = this.SCROLL_ANCHOR_OFFSET) => {
     if (!this.chatHistoryRef.current) return true;
 
     const { scrollTop, scrollHeight, clientHeight } = this.chatHistoryRef.current;
     const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
-    const threshold = 12; // pixels from bottom before we consider the user "at" the bottom
     return distanceFromBottom <= threshold;
   };
 
   /**
    * Update scroll state based on current position
    */
-  updateScrollState = () => {
-    const isNearBottom = this.isUserNearBottom();
+  updateScrollState = (options: { fromUser?: boolean } = {}) => {
+    if (!this.chatHistoryRef.current) return;
+
+    const { fromUser = false } = options;
+    const { scrollTop, scrollHeight, clientHeight } = this.chatHistoryRef.current;
+    const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
+    const isNearBottom = distanceFromBottom <= this.SCROLL_ANCHOR_OFFSET;
     const showScrollToBottom = !isNearBottom;
 
     this.setState(prevState => {
-      if (prevState.isNearBottom === isNearBottom && prevState.showScrollToBottom === showScrollToBottom) {
+      let isAutoScrollLocked = prevState.isAutoScrollLocked;
+
+      if (fromUser) {
+        isAutoScrollLocked = !isNearBottom;
+      } else if (isNearBottom && prevState.isAutoScrollLocked) {
+        isAutoScrollLocked = false;
+      }
+
+      if (
+        prevState.isNearBottom === isNearBottom &&
+        prevState.showScrollToBottom === showScrollToBottom &&
+        prevState.isAutoScrollLocked === isAutoScrollLocked
+      ) {
         return null;
       }
 
       return {
         isNearBottom,
-        showScrollToBottom
+        showScrollToBottom,
+        isAutoScrollLocked
       };
     });
   };
@@ -1706,16 +1739,51 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
    * Handle scroll events to track user scroll position
    */
   handleScroll = () => {
-    this.updateScrollState();
+    if (this.isProgrammaticScroll) {
+      this.updateScrollState();
+      return;
+    }
+
+    this.updateScrollState({ fromUser: true });
   };
 
   /**
-   * Scroll the chat history to the bottom
+   * Scroll the chat history to the bottom while respecting the anchor offset
    */
-  scrollToBottom = () => {
-    if (this.chatHistoryRef.current) {
-      this.chatHistoryRef.current.scrollTop = this.chatHistoryRef.current.scrollHeight;
-      this.updateScrollState();
+  scrollToBottom = (options: ScrollToBottomOptions = {}) => {
+    if (!this.chatHistoryRef.current) return;
+
+    const { behavior = 'auto', manual = false } = options;
+    const container = this.chatHistoryRef.current;
+
+    const maxScrollTop = Math.max(container.scrollHeight - container.clientHeight, 0);
+    const targetTop = Math.max(maxScrollTop - this.SCROLL_ANCHOR_OFFSET, 0);
+
+    this.isProgrammaticScroll = true;
+
+    if (typeof container.scrollTo === 'function') {
+      try {
+        container.scrollTo({ top: targetTop, behavior });
+      } catch (_err) {
+        container.scrollTop = targetTop;
+      }
+    } else {
+      container.scrollTop = targetTop;
+    }
+
+    if (manual && this.state.isAutoScrollLocked) {
+      this.setState({ isAutoScrollLocked: false });
+    }
+
+    const finalize = () => {
+      this.isProgrammaticScroll = false;
+      this.updateScrollState({ fromUser: manual });
+    };
+
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(finalize);
+    } else {
+      setTimeout(finalize, 0);
     }
   }
 
@@ -1924,7 +1992,6 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       
       // Handle streaming chunks
       const onChunk = (chunk: string) => {
-        const wasNearBottom = this.state.isNearBottom || this.isUserNearBottom();
         currentResponseContent += chunk;
         this.setState(prevState => {
           const updatedMessages = prevState.messages.map(message => {
@@ -1939,11 +2006,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
           
           return { ...prevState, messages: updatedMessages };
         }, () => {
-          if (wasNearBottom) {
-            this.scrollToBottom();
-          } else {
-            this.updateScrollState();
-          }
+          this.updateScrollState();
         });
       };
       
@@ -2131,7 +2194,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
                   onRegenerateResponse={this.regenerateResponse}
                   onContinueGeneration={this.continueGeneration}
                   showScrollToBottom={this.state.showScrollToBottom}
-                  onScrollToBottom={this.scrollToBottom}
+                  onScrollToBottom={() => this.scrollToBottom({ behavior: 'smooth', manual: true })}
                   onToggleMarkdown={this.toggleMarkdownView}
                   onScroll={this.handleScroll}
                 />

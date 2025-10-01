@@ -244,6 +244,7 @@ export interface BrainDriveChatState {
   // Scroll state
   isNearBottom: boolean;
   showScrollToBottom: boolean;
+  isAutoScrollLocked: boolean;
   
   // History UI state
   showAllHistory: boolean;

@@ -40,25 +40,37 @@
 
 /* Dark theme adjustments for scroll button */
 .dark-theme .scroll-to-bottom-button {
-  background-color: var(--button-primary-bg);
-  color: var(--button-primary-text);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  background-color: rgba(33, 150, 243, 0.85);
+  color: #ffffff;
+  box-shadow: 0 16px 34px rgba(8, 47, 73, 0.55);
 }
 
 .dark-theme .scroll-to-bottom-button:hover {
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 20px 40px rgba(8, 47, 73, 0.6);
+}
+
+/* Dark theme adjustments for message bubbles */
+.dark-theme .message-ai .message-bubble {
+  background-color: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 12px 34px rgba(8, 47, 73, 0.55);
+}
+
+.dark-theme .message-user .message-bubble {
+  background-color: rgba(33, 150, 243, 0.2);
+  border-color: rgba(33, 150, 243, 0.35);
+  color: var(--text-color);
 }
 
 /* Dark theme adjustments for message actions */
-.dark-theme .message-action-btn:hover {
-  background-color: rgba(255, 255, 255, 0.1);
+.dark-theme .message-action-btn {
+  background-color: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.16);
 }
 
-/* Dark theme adjustments for user messages */
-.dark-theme .message-user {
-  background-color: rgba(255, 255, 255, 0.05);
-  color: var(--text-color);
-  border-color: rgba(255, 255, 255, 0.1);
+.dark-theme .message-action-btn:hover {
+  background-color: rgba(33, 150, 243, 0.25);
+  border-color: rgba(33, 150, 243, 0.45);
 }
 
 .dark-theme .message-edit-input {
@@ -67,9 +79,9 @@
 }
 
 /* Dark theme adjustments for search results */
-.dark-theme .message-search-results {
-  background-color: rgba(33, 150, 243, 0.1);
-  border-color: rgba(33, 150, 243, 0.3);
+.dark-theme .message-search-results .message-bubble {
+  background-color: rgba(33, 150, 243, 0.12);
+  border-color: rgba(33, 150, 243, 0.32);
 }
 
 .dark-theme .search-result-item {
@@ -86,8 +98,8 @@
 }
 
 /* Dark theme adjustments for document context */
-.dark-theme .message-document-context {
-  background-color: rgba(76, 175, 80, 0.1);
+.dark-theme .message-document-context .message-bubble {
+  background-color: rgba(76, 175, 80, 0.12);
   border-color: rgba(76, 175, 80, 0.3);
 }
 
@@ -143,13 +155,12 @@
 }
 
 /* Dark theme adjustments for thinking blocks */
-.dark-theme .message-content .thinking-block {
-  background-color: rgba(255, 255, 255, 0.02);
-  border-color: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.7);
+.dark-theme .message-body .thinking-block {
+  background-color: rgba(33, 150, 243, 0.12);
+  border-color: rgba(33, 150, 243, 0.35);
+  color: rgba(255, 255, 255, 0.8);
 }
 
-.dark-theme .message-content .thinking-block .thinking-header {
-  background-color: rgba(255, 255, 255, 0.03);
-  border-bottom-color: rgba(255, 255, 255, 0.05);
+.dark-theme .message-body .thinking-block .thinking-header {
+  background-color: rgba(33, 150, 243, 0.16);
 }
