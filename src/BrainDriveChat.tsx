@@ -60,7 +60,10 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   private documentService: DocumentService | null = null;
   private currentStreamingAbortController: AbortController | null = null;
   private menuButtonRef: HTMLButtonElement | null = null;
-  private readonly SCROLL_ANCHOR_OFFSET = -420;
+  // Keep the live edge comfortably in view instead of snapping flush bottom
+  private readonly SCROLL_ANCHOR_OFFSET = 420;
+  private readonly MIN_VISIBLE_LAST_MESSAGE_HEIGHT = 64;
+  private readonly NEAR_BOTTOM_EPSILON = 24;
   private isProgrammaticScroll = false;
   private pendingPersonaRequestId: string | null = null;
 
@@ -1970,13 +1973,37 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   }
 
   /**
+   * Determine how far above the live edge we should keep the viewport.
+   * Ensures we never hide the entire final message when it's short.
+   */
+  private getEffectiveAnchorOffset = (container: HTMLDivElement): number => {
+    const baseOffset = Math.max(this.SCROLL_ANCHOR_OFFSET, 0);
+    if (baseOffset === 0) {
+      return 0;
+    }
+
+    const lastMessage = container.querySelector('.message:last-of-type') as HTMLElement | null;
+    if (!lastMessage) {
+      return baseOffset;
+    }
+
+    const lastMessageHeight = lastMessage.offsetHeight;
+    const maxAllowableOffset = Math.max(lastMessageHeight - this.MIN_VISIBLE_LAST_MESSAGE_HEIGHT, 0);
+    return Math.min(baseOffset, maxAllowableOffset);
+  };
+
+  /**
    * Check if user is near the bottom of the chat
    */
-  isUserNearBottom = (threshold: number = this.SCROLL_ANCHOR_OFFSET) => {
+  isUserNearBottom = () => {
     if (!this.chatHistoryRef.current) return true;
 
-    const { scrollTop, scrollHeight, clientHeight } = this.chatHistoryRef.current;
+    const container = this.chatHistoryRef.current;
+    const { scrollTop, scrollHeight, clientHeight } = container;
     const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
+    const dynamicOffset = this.getEffectiveAnchorOffset(container);
+    const threshold = Math.max(dynamicOffset, this.NEAR_BOTTOM_EPSILON);
+
     return distanceFromBottom <= threshold;
   };
 
@@ -1987,9 +2014,12 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     if (!this.chatHistoryRef.current) return;
 
     const { fromUser = false } = options;
-    const { scrollTop, scrollHeight, clientHeight } = this.chatHistoryRef.current;
+    const container = this.chatHistoryRef.current;
+    const { scrollTop, scrollHeight, clientHeight } = container;
     const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
-    const isNearBottom = distanceFromBottom <= this.SCROLL_ANCHOR_OFFSET;
+    const dynamicOffset = this.getEffectiveAnchorOffset(container);
+    const nearBottomThreshold = Math.max(dynamicOffset, this.NEAR_BOTTOM_EPSILON);
+    const isNearBottom = distanceFromBottom <= nearBottomThreshold;
     const showScrollToBottom = !isNearBottom;
 
     this.setState(prevState => {
@@ -2038,8 +2068,9 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     const { behavior = 'auto', manual = false } = options;
     const container = this.chatHistoryRef.current;
 
+    const dynamicOffset = this.getEffectiveAnchorOffset(container);
     const maxScrollTop = Math.max(container.scrollHeight - container.clientHeight, 0);
-    const targetTop = Math.max(maxScrollTop - this.SCROLL_ANCHOR_OFFSET, 0);
+    const targetTop = Math.max(maxScrollTop - dynamicOffset, 0);
 
     this.isProgrammaticScroll = true;
 
@@ -2288,7 +2319,11 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
           
           return { ...prevState, messages: updatedMessages };
         }, () => {
-          this.updateScrollState();
+          if (!this.state.isAutoScrollLocked) {
+            this.scrollToBottom();
+          } else {
+            this.updateScrollState();
+          }
         });
       };
       
