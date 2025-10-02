@@ -2,6 +2,9 @@ import React from 'react';
 import { ModelInfo, ConversationInfo, PersonaInfo } from '../types';
 import { formatRelativeTime } from '../utils';
 import { ComposeIcon, ThreeDotsIcon, EditIcon, DeleteIcon } from '../icons';
+import SearchableDropdown, {
+  DropdownOption
+} from './SearchableDropdown';
 
 interface ChatHeaderProps {
   // Model selection props
@@ -64,6 +67,44 @@ class ChatHeader extends React.Component<ChatHeaderProps, ChatHeaderState> {
     }
   };
 
+  private emitSelectEvent(value: string) {
+    return {
+      target: { value } as unknown as EventTarget & HTMLSelectElement,
+      currentTarget: { value } as unknown as EventTarget & HTMLSelectElement
+    } as React.ChangeEvent<HTMLSelectElement>;
+  }
+
+  private handleModelSelect = (value: string) => {
+    const { onModelChange } = this.props;
+    if (!onModelChange) {
+      return;
+    }
+
+    onModelChange(this.emitSelectEvent(value));
+  };
+
+  private handlePersonaSelect = (value: string) => {
+    const { onPersonaChange } = this.props;
+    if (!onPersonaChange) {
+      return;
+    }
+
+    onPersonaChange(this.emitSelectEvent(value));
+  };
+
+  private handleConversationSelect = (value: string) => {
+    const { onConversationSelect, onNewChatClick } = this.props;
+
+    if (!value) {
+      onNewChatClick();
+      this.setState({ isMenuOpen: false });
+      return;
+    }
+
+    onConversationSelect(this.emitSelectEvent(value));
+    this.setState({ isMenuOpen: false });
+  };
+
   render() {
     const {
       models,
@@ -84,36 +125,67 @@ class ChatHeader extends React.Component<ChatHeaderProps, ChatHeaderState> {
       isLoadingHistory
     } = this.props;
 
+    const modelOptions: DropdownOption[] = models.map(model => ({
+      value: `${model.provider}_${model.serverId}_${model.name}`,
+      label: `${model.name} (${model.serverName})`,
+      keywords: [model.provider, model.serverName, model.name]
+    }));
+
+    const personaOptions: DropdownOption[] = [
+      {
+        value: '',
+        label: 'No Persona'
+      },
+      ...personas.map(persona => ({
+        value: persona.id,
+        label: persona.name,
+        keywords: [persona.description || '', persona.name]
+      }))
+    ];
+
+    const conversationOptions: DropdownOption[] = [
+      {
+        value: '',
+        label: 'Start New Chat'
+      },
+      ...conversations.map(conv => ({
+        value: conv.id,
+        label: conv.title || 'Untitled',
+        description:
+          conv.updated_at || conv.created_at
+            ? formatRelativeTime(conv.updated_at || conv.created_at)
+            : undefined,
+        keywords: [conv.title || '', conv.id]
+      }))
+    ];
+
+    const selectedModelValue = selectedModel
+      ? `${selectedModel.provider}_${selectedModel.serverId}_${selectedModel.name}`
+      : '';
+
+    const selectedPersonaValue = selectedPersona?.id || '';
+
+    const selectedConversationValue = selectedConversation?.id || '';
+
     return (
       <>
         <div className="chat-header-redesigned">
           {/* Left Section - Model Selection */}
           {showModelSelection && (
             <div className="header-model-section">
-              <label className="header-label">Model</label>
-              {isLoadingModels ? (
-                <div className="header-loading">Loading models...</div>
-              ) : (
-                <select
-                  value={selectedModel ? `${selectedModel.provider}_${selectedModel.serverId}_${selectedModel.name}` : ''}
-                  onChange={onModelChange}
-                  className="header-select"
-                  disabled={models.length === 0}
-                >
-                  {models.length === 0 ? (
-                    <option value="">No models available</option>
-                  ) : (
-                    models.map(model => {
-                      const modelId = `${model.provider}_${model.serverId}_${model.name}`;
-                      return (
-                        <option key={modelId} value={modelId}>
-                          {model.name} ({model.serverName})
-                        </option>
-                      );
-                    })
-                  )}
-                </select>
-              )}
+              <label className="header-label">Models</label>
+              <SearchableDropdown
+                id="model-selection"
+                value={selectedModelValue}
+                options={modelOptions}
+                onSelect={this.handleModelSelect}
+                placeholder={models.length === 0 ? 'No models available' : 'Select model'}
+                searchPlaceholder="Search models"
+                noResultsText="No models found"
+                disabled={models.length === 0}
+                loading={isLoadingModels}
+                triggerClassName="header-select"
+              />
             </div>
           )}
 
@@ -121,19 +193,17 @@ class ChatHeader extends React.Component<ChatHeaderProps, ChatHeaderState> {
           {showPersonaSelection && (
             <div className="header-persona-section">
               <label className="header-label">Persona</label>
-              <select
-                value={selectedPersona?.id || ''}
-                onChange={onPersonaChange}
-                className="header-select"
+              <SearchableDropdown
+                id="persona-selection"
+                value={selectedPersonaValue}
+                options={personaOptions}
+                onSelect={this.handlePersonaSelect}
+                placeholder="No Persona"
+                searchPlaceholder="Search personas"
+                noResultsText="No personas found"
                 disabled={this.props.isLoading || this.props.isLoadingHistory}
-              >
-                <option value="">No Persona</option>
-                {personas.map(persona => (
-                  <option key={persona.id} value={persona.id}>
-                    {persona.name}
-                  </option>
-                ))}
-              </select>
+                triggerClassName="header-select"
+              />
             </div>
           )}
 
@@ -141,26 +211,38 @@ class ChatHeader extends React.Component<ChatHeaderProps, ChatHeaderState> {
           {showConversationHistory && (
             <div className="header-history-section">
               <label className="header-label">History</label>
-              <select
-                className="header-select header-select-history"
-                value={selectedConversation?.id || ''}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  if (!value) {
-                    onNewChatClick();
-                  } else {
-                    onConversationSelect(e);
-                  }
-                }}
+              <SearchableDropdown
+                id="conversation-selection"
+                value={selectedConversationValue}
+                options={conversationOptions}
+                onSelect={this.handleConversationSelect}
+                placeholder="Start New Chat"
+                searchPlaceholder="Search conversations"
+                noResultsText="No conversations found"
                 disabled={isLoading || isLoadingHistory}
-              >
-                <option value="">Start New Chat</option>
-                {conversations.map(conv => (
-                  <option key={conv.id} value={conv.id}>
-                    {conv.title || 'Untitled'}{conv.updated_at || conv.created_at ? ` • ${formatRelativeTime(conv.updated_at || conv.created_at)}` : ''}
-                  </option>
-                ))}
-              </select>
+                loading={isLoadingHistory}
+                triggerClassName="header-select header-select-history"
+                renderOption={(option, { isSelected }) => (
+                  <div className="searchable-dropdown-option-content">
+                    <span className="searchable-dropdown-option-label">
+                      {option.label}
+                      {isSelected ? ' (current)' : ''}
+                    </span>
+                    {option.description && (
+                      <span className="searchable-dropdown-option-description">
+                        {option.description}
+                      </span>
+                    )}
+                  </div>
+                )}
+                renderValue={(selected) =>
+                  selected
+                    ? selected.description
+                      ? `${selected.label} • ${selected.description}`
+                      : selected.label
+                    : 'Start New Chat'
+                }
+              />
               <div className="history-actions-wrapper" style={{ position: 'relative' }}>
                 <button
                   className="header-icon-only"
