@@ -8,7 +8,7 @@ module.exports = {
   entry: "./src/index",
   output: {
     path: path.resolve(__dirname, 'dist'),
-    //path: path.resolve(__dirname, '../../backend/plugins/shared/BrainDriveChat/v1.0.17/dist'),
+    //path: path.resolve(__dirname, '../../backend/plugins/shared/BrainDriveChat/v1.0.19/dist'),
     publicPath: "auto",
     clean: true,
     library: {
