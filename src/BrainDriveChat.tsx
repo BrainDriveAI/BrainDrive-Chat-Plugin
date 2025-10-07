@@ -10,8 +10,7 @@ import {
   DocumentProcessingResult
 } from './types';
 import {
-  generateId,
-  debounce,
+  generateId
 } from './utils';
 
 // Import constants
@@ -41,6 +40,7 @@ import { AIService, SearchService, DocumentService } from './services';
 type ScrollToBottomOptions = {
   behavior?: ScrollBehavior;
   manual?: boolean;
+  force?: boolean;
 };
 
 /**
@@ -64,7 +64,11 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   private readonly SCROLL_ANCHOR_OFFSET = 420;
   private readonly MIN_VISIBLE_LAST_MESSAGE_HEIGHT = 64;
   private readonly NEAR_BOTTOM_EPSILON = 24;
+  private readonly STRICT_BOTTOM_THRESHOLD = 4;
+  private readonly USER_SCROLL_INTENT_GRACE_MS = 300;
   private isProgrammaticScroll = false;
+  private pendingAutoScrollTimeout: ReturnType<typeof setTimeout> | null = null;
+  private lastUserScrollTs = 0;
   private pendingPersonaRequestId: string | null = null;
 
   constructor(props: BrainDriveChatProps) {
@@ -131,7 +135,22 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     };
     
     // Bind methods
-    this.debouncedScrollToBottom = debounce((options?: ScrollToBottomOptions) => this.scrollToBottom(options), UI_CONFIG.SCROLL_DEBOUNCE_DELAY);
+    this.debouncedScrollToBottom = (options?: ScrollToBottomOptions) => {
+      const requestedAt = Date.now();
+
+      if (this.pendingAutoScrollTimeout) {
+        clearTimeout(this.pendingAutoScrollTimeout);
+      }
+
+      this.pendingAutoScrollTimeout = setTimeout(() => {
+        this.pendingAutoScrollTimeout = null;
+        if (this.canAutoScroll(requestedAt)) {
+          this.scrollToBottom(options);
+        } else {
+          this.updateScrollState();
+        }
+      }, UI_CONFIG.SCROLL_DEBOUNCE_DELAY);
+    };
     
     // Initialize AI service
     this.aiService = new AIService(props.services);
@@ -247,6 +266,8 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     if (this.currentStreamingAbortController) {
       this.currentStreamingAbortController.abort();
     }
+
+    this.cancelPendingAutoScroll();
   }
 
   /**
@@ -703,30 +724,15 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         return conv && typeof conv === 'object' && conv.id && conv.user_id;
       });
       
-      // Sort conversations by most recently updated or created
-      validConversations.sort((a: any, b: any) => {
-        if (a.updated_at && b.updated_at) {
-          return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
-        }
-        
-        if (a.updated_at && !b.updated_at) {
-          return -1;
-        }
-        
-        if (!a.updated_at && b.updated_at) {
-          return 1;
-        }
-        
-        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-      });
+      const sortedConversations = this.sortConversationsByRecency(validConversations);
       
       // Update conversations list and select current conversation if it exists
       const currentConversation = this.state.conversation_id 
-        ? validConversations.find(conv => conv.id === this.state.conversation_id)
+        ? sortedConversations.find(conv => conv.id === this.state.conversation_id)
         : null;
       
       this.setState({
-        conversations: validConversations,
+        conversations: sortedConversations,
         selectedConversation: currentConversation || this.state.selectedConversation
       });
       
@@ -814,31 +820,13 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         return conv && typeof conv === 'object' && conv.id && conv.user_id;
       });
       
-      // Sort conversations by most recently updated or created
-      validConversations.sort((a: any, b: any) => {
-        // Use updated_at if available for both conversations
-        if (a.updated_at && b.updated_at) {
-          return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
-        }
-        
-        // If only one has updated_at, prioritize that one
-        if (a.updated_at && !b.updated_at) {
-          return -1; // a comes first
-        }
-        
-        if (!a.updated_at && b.updated_at) {
-          return 1; // b comes first
-        }
-        
-        // If neither has updated_at, fall back to created_at
-        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-      });
-      
+      const sortedConversations = this.sortConversationsByRecency(validConversations);
+
       // Auto-select the most recent conversation if available
-      const mostRecentConversation = validConversations.length > 0 ? validConversations[0] : null;
+      const mostRecentConversation = sortedConversations.length > 0 ? sortedConversations[0] : null;
       
       this.setState({
-        conversations: validConversations,
+        conversations: sortedConversations,
         selectedConversation: mostRecentConversation,
         isLoadingHistory: false
       }, () => {
@@ -1380,8 +1368,10 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       
       console.log(`✅ Conversation history loaded: ${conversationId}, ${messages.length} messages`);
       
-      // Scroll to bottom after loading history
-      setTimeout(() => this.scrollToBottom(), 100);
+      // Scroll to bottom after loading history so the latest reply is visible
+      setTimeout(() => {
+        this.scrollToBottom({ force: true });
+      }, 100);
       
     } catch (error) {
       // Error loading conversation history
@@ -1977,63 +1967,178 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
    * Ensures we never hide the entire final message when it's short.
    */
   private getEffectiveAnchorOffset = (container: HTMLDivElement): number => {
+    const lastMessage = this.state.messages[this.state.messages.length - 1];
+    if (lastMessage?.isStreaming) {
+      return 0;
+    }
+
     const baseOffset = Math.max(this.SCROLL_ANCHOR_OFFSET, 0);
     if (baseOffset === 0) {
       return 0;
     }
 
-    const lastMessage = container.querySelector('.message:last-of-type') as HTMLElement | null;
-    if (!lastMessage) {
+    const lastMessageElement = container.querySelector('.message:last-of-type') as HTMLElement | null;
+    if (!lastMessageElement) {
       return baseOffset;
     }
 
-    const lastMessageHeight = lastMessage.offsetHeight;
+    const lastMessageHeight = lastMessageElement.offsetHeight;
     const maxAllowableOffset = Math.max(lastMessageHeight - this.MIN_VISIBLE_LAST_MESSAGE_HEIGHT, 0);
     return Math.min(baseOffset, maxAllowableOffset);
+  };
+
+  private getScrollMetrics = () => {
+    const container = this.chatHistoryRef.current;
+    if (!container) {
+      return {
+        distanceFromBottom: 0,
+        dynamicOffset: 0
+      };
+    }
+
+    const { scrollTop, scrollHeight, clientHeight } = container;
+    const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
+    const dynamicOffset = this.getEffectiveAnchorOffset(container);
+
+    return { distanceFromBottom, dynamicOffset };
+  };
+
+  private getConversationSortTimestamp = (conversation: any): number => {
+    if (!conversation || typeof conversation !== 'object') {
+      return 0;
+    }
+
+    const candidateFields = [
+      conversation.last_message_at,
+      conversation.lastMessageAt,
+      conversation.latest_message_at,
+      conversation.latestMessageAt,
+      conversation.started_at,
+      conversation.startedAt,
+      conversation.updated_at,
+      conversation.updatedAt,
+      conversation.created_at,
+      conversation.createdAt
+    ];
+
+    for (const maybeDate of candidateFields) {
+      if (!maybeDate) continue;
+      const timestamp = new Date(maybeDate).getTime();
+      if (!Number.isNaN(timestamp)) {
+        return timestamp;
+      }
+    }
+
+    return 0;
+  };
+
+  private sortConversationsByRecency = (conversations: any[]): any[] => {
+    return [...conversations].sort((a, b) => {
+      const timeA = this.getConversationSortTimestamp(a);
+      const timeB = this.getConversationSortTimestamp(b);
+
+      return timeB - timeA;
+    });
   };
 
   /**
    * Check if user is near the bottom of the chat
    */
-  isUserNearBottom = () => {
+  isUserNearBottom = (thresholdOverride?: number) => {
     if (!this.chatHistoryRef.current) return true;
 
-    const container = this.chatHistoryRef.current;
-    const { scrollTop, scrollHeight, clientHeight } = container;
-    const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
-    const dynamicOffset = this.getEffectiveAnchorOffset(container);
-    const threshold = Math.max(dynamicOffset, this.NEAR_BOTTOM_EPSILON);
+    const { distanceFromBottom, dynamicOffset } = this.getScrollMetrics();
+    const threshold = thresholdOverride ?? Math.max(dynamicOffset, this.NEAR_BOTTOM_EPSILON);
 
     return distanceFromBottom <= threshold;
+  };
+
+  private hasRecentUserIntent = () => {
+    if (!this.lastUserScrollTs) {
+      return false;
+    }
+
+    return Date.now() - this.lastUserScrollTs <= this.USER_SCROLL_INTENT_GRACE_MS;
+  };
+
+  private canAutoScroll = (requestedAt: number = Date.now()) => {
+    if (this.state.isAutoScrollLocked) {
+      return false;
+    }
+
+    if (this.lastUserScrollTs && this.lastUserScrollTs > requestedAt) {
+      return false;
+    }
+
+    return this.isUserNearBottom();
+  };
+
+  private cancelPendingAutoScroll = () => {
+    if (this.pendingAutoScrollTimeout) {
+      clearTimeout(this.pendingAutoScrollTimeout);
+      this.pendingAutoScrollTimeout = null;
+    }
+  };
+
+  private registerUserScrollIntent = () => {
+    this.lastUserScrollTs = Date.now();
+    this.cancelPendingAutoScroll();
+
+    this.setState(prevState => {
+      if (prevState.isAutoScrollLocked && prevState.showScrollToBottom) {
+        return null;
+      }
+
+      return {
+        isAutoScrollLocked: true,
+        showScrollToBottom: true
+      };
+    });
   };
 
   /**
    * Update scroll state based on current position
    */
-  updateScrollState = (options: { fromUser?: boolean } = {}) => {
+  updateScrollState = (options: { fromUser?: boolean; manualUnlock?: boolean } = {}) => {
     if (!this.chatHistoryRef.current) return;
 
-    const { fromUser = false } = options;
-    const container = this.chatHistoryRef.current;
-    const { scrollTop, scrollHeight, clientHeight } = container;
-    const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
-    const dynamicOffset = this.getEffectiveAnchorOffset(container);
+    const { fromUser = false, manualUnlock = false } = options;
+    const { distanceFromBottom, dynamicOffset } = this.getScrollMetrics();
     const nearBottomThreshold = Math.max(dynamicOffset, this.NEAR_BOTTOM_EPSILON);
     const isNearBottom = distanceFromBottom <= nearBottomThreshold;
-    const showScrollToBottom = !isNearBottom;
+    const isAtStrictBottom = distanceFromBottom <= this.STRICT_BOTTOM_THRESHOLD;
+
+    let shouldClearUserIntent = false;
+    let shouldSuppressManualIntent = false;
 
     this.setState(prevState => {
       let isAutoScrollLocked = prevState.isAutoScrollLocked;
 
-      if (fromUser) {
-        isAutoScrollLocked = !isNearBottom;
-      } else if (isNearBottom && prevState.isAutoScrollLocked) {
+      if (manualUnlock) {
+        if (isAutoScrollLocked) {
+          shouldClearUserIntent = true;
+        }
         isAutoScrollLocked = false;
+      } else if (fromUser) {
+        if (isAtStrictBottom) {
+          if (isAutoScrollLocked) {
+            shouldClearUserIntent = true;
+          }
+          isAutoScrollLocked = false;
+          shouldSuppressManualIntent = true;
+        } else {
+          isAutoScrollLocked = true;
+        }
+      } else if (isAtStrictBottom && prevState.isAutoScrollLocked && !this.hasRecentUserIntent()) {
+        isAutoScrollLocked = false;
+        shouldClearUserIntent = true;
       }
+
+      const nextShowScrollToBottom = isAutoScrollLocked ? true : !isAtStrictBottom;
 
       if (
         prevState.isNearBottom === isNearBottom &&
-        prevState.showScrollToBottom === showScrollToBottom &&
+        prevState.showScrollToBottom === nextShowScrollToBottom &&
         prevState.isAutoScrollLocked === isAutoScrollLocked
       ) {
         return null;
@@ -2041,9 +2146,17 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
 
       return {
         isNearBottom,
-        showScrollToBottom,
+        showScrollToBottom: nextShowScrollToBottom,
         isAutoScrollLocked
       };
+    }, () => {
+      if (shouldClearUserIntent && !this.state.isAutoScrollLocked) {
+        this.lastUserScrollTs = 0;
+      }
+
+      if (shouldSuppressManualIntent) {
+        this.lastUserScrollTs = 0;
+      }
     });
   };
 
@@ -2056,7 +2169,24 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       return;
     }
 
+    this.registerUserScrollIntent();
     this.updateScrollState({ fromUser: true });
+  };
+
+  handleUserScrollIntent = (_source: 'pointer' | 'wheel' | 'touch' | 'key') => {
+    this.registerUserScrollIntent();
+  };
+
+  handleScrollToBottomClick = () => {
+    this.scrollToBottom({ behavior: 'smooth', manual: true });
+  };
+
+  private followStreamIfAllowed = () => {
+    if (this.canAutoScroll()) {
+      this.scrollToBottom();
+    } else {
+      this.updateScrollState();
+    }
   };
 
   /**
@@ -2065,10 +2195,12 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   scrollToBottom = (options: ScrollToBottomOptions = {}) => {
     if (!this.chatHistoryRef.current) return;
 
-    const { behavior = 'auto', manual = false } = options;
+    this.cancelPendingAutoScroll();
+    const { behavior = 'auto', manual = false, force = false } = options;
     const container = this.chatHistoryRef.current;
 
-    const dynamicOffset = this.getEffectiveAnchorOffset(container);
+    const useAnchorOffset = !(manual || force);
+    const dynamicOffset = useAnchorOffset ? this.getEffectiveAnchorOffset(container) : 0;
     const maxScrollTop = Math.max(container.scrollHeight - container.clientHeight, 0);
     const targetTop = Math.max(maxScrollTop - dynamicOffset, 0);
 
@@ -2084,13 +2216,14 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       container.scrollTop = targetTop;
     }
 
-    if (manual && this.state.isAutoScrollLocked) {
-      this.setState({ isAutoScrollLocked: false });
-    }
-
     const finalize = () => {
       this.isProgrammaticScroll = false;
-      this.updateScrollState({ fromUser: manual });
+      if (manual || force) {
+        this.lastUserScrollTs = 0;
+        this.updateScrollState({ manualUnlock: true });
+      } else {
+        this.updateScrollState();
+      }
     };
 
     if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
@@ -2162,6 +2295,13 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     };
     
     this.addMessageToChat(userMessage);
+
+    if (typeof window !== 'undefined') {
+      const schedule = window.requestAnimationFrame || ((cb: FrameRequestCallback) => window.setTimeout(cb, 0));
+      schedule(() => this.scrollToBottom({ behavior: 'smooth', manual: true }));
+    } else {
+      this.scrollToBottom({ manual: true });
+    }
     
     // Clear input
     this.setState({ inputText: '' });
@@ -2316,15 +2456,9 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
             }
             return message;
           });
-          
+
           return { ...prevState, messages: updatedMessages };
-        }, () => {
-          if (!this.state.isAutoScrollLocked) {
-            this.scrollToBottom();
-          } else {
-            this.updateScrollState();
-          }
-        });
+        }, this.followStreamIfAllowed);
       };
       
       // Handle conversation ID updates
@@ -2356,8 +2490,6 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         this.currentStreamingAbortController
       );
       
-      const shouldScrollToBottom = this.state.isNearBottom || this.isUserNearBottom();
-
       // Finalize the message
       this.setState(prevState => {
         console.log('✅ Finalizing message with ID:', placeholderId);
@@ -2385,11 +2517,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         };
       }, () => {
         console.log(`✅ Message finalized. Total messages: ${this.state.messages.length}`);
-        if (shouldScrollToBottom) {
-          this.scrollToBottom();
-        } else {
-          this.updateScrollState();
-        }
+        this.followStreamIfAllowed();
         // Focus the input box after response is completed
         this.focusInput();
         
@@ -2511,9 +2639,10 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
                   onRegenerateResponse={this.regenerateResponse}
                   onContinueGeneration={this.continueGeneration}
                   showScrollToBottom={this.state.showScrollToBottom}
-                  onScrollToBottom={() => this.scrollToBottom({ behavior: 'smooth', manual: true })}
+                  onScrollToBottom={this.handleScrollToBottomClick}
                   onToggleMarkdown={this.toggleMarkdownView}
                   onScroll={this.handleScroll}
+                  onUserScrollIntent={this.handleUserScrollIntent}
                 />
               </div>
               

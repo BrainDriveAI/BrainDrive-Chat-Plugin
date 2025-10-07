@@ -14,6 +14,18 @@ import {
     MarkdownToggleIcon
   } from '../icons';
 
+const KEYBOARD_SCROLL_KEYS = new Set<string>([
+  'ArrowUp',
+  'ArrowDown',
+  'PageUp',
+  'PageDown',
+  'Home',
+  'End',
+  'Space'
+]);
+
+type ScrollIntentSource = 'pointer' | 'wheel' | 'touch' | 'key';
+
 interface ChatHistoryProps {
   messages: ChatMessage[];
   isLoading: boolean;
@@ -32,6 +44,7 @@ interface ChatHistoryProps {
   onScrollToBottom?: () => void;
   onToggleMarkdown?: (messageId: string) => void;
   onScroll?: (event: React.UIEvent<HTMLDivElement>) => void;
+  onUserScrollIntent?: (source: ScrollIntentSource) => void;
 }
 
 interface ChatHistoryState {
@@ -47,6 +60,30 @@ class ChatHistory extends React.Component<ChatHistoryProps, ChatHistoryState> {
       expandedDocumentContext: new Set()
     };
   }
+
+  emitScrollIntent = (source: ScrollIntentSource) => {
+    if (this.props.onUserScrollIntent) {
+      this.props.onUserScrollIntent(source);
+    }
+  };
+
+  handlePointerDown = () => {
+    this.emitScrollIntent('pointer');
+  };
+
+  handleWheel = () => {
+    this.emitScrollIntent('wheel');
+  };
+
+  handleTouchStart = () => {
+    this.emitScrollIntent('touch');
+  };
+
+  handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (KEYBOARD_SCROLL_KEYS.has(event.key)) {
+      this.emitScrollIntent('key');
+    }
+  };
 
   /**
    * Toggle search results expansion
@@ -533,6 +570,11 @@ class ChatHistory extends React.Component<ChatHistoryProps, ChatHistoryState> {
           ref={chatHistoryRef}
           className="chat-history"
           onScroll={this.props.onScroll}
+          onPointerDown={this.handlePointerDown}
+          onWheel={this.handleWheel}
+          onTouchStart={this.handleTouchStart}
+          onKeyDown={this.handleKeyDown}
+          tabIndex={0}
         >
           {/* Show error if any */}
           {this.renderError()}

@@ -82,7 +82,7 @@ class ThinkingBlock extends React.Component<ThinkingBlockProps, ThinkingBlockSta
 
     const showEllipsis = isStreaming && ellipsisStage >= 0;
     const ellipsisText = showEllipsis ? ` ${'.'.repeat(ellipsisStage + 1)}` : '';
-    const titleText = `Thinking Process${ellipsisText}`;
+    const titleText = `Thinking${ellipsisText}`;
 
     return (
       <div className={`thinking-block ${isExpanded ? 'expanded' : 'collapsed'} ${isStreaming ? 'thinking-streaming' : ''}`}>
