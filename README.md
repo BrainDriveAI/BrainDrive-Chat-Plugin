@@ -1,6 +1,8 @@
 # BrainDriveChat Plugin
 
-A comprehensive AI chat interface that combines AI prompt chat, model selection, and conversation history management in a single, responsive plugin with light/dark theme support.
+The **BrainDrive Chat Plugin** is the default, modular chat experience for BrainDrive. It combines **chat**, **model selection**, **personas** and **conversation history** into a single, extensible UI you can customize, fork, and ship on your own terms. 
+
+Think **WordPress for AI**—install the core, add this plugin, and you’re chatting with local or API models in minutes. **Your AI. Your Rules.**
 
 ## Features
 
