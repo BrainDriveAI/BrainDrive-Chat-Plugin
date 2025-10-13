@@ -8,24 +8,61 @@ Think **WordPress for AI**—install the core, add this plugin, and you’re cha
 
 ## Features
 
-- **Unified Chat Interface**: Complete AI chat experience with streaming support
-- **Model Selection**: Dynamic model selection from configured providers
-- **Conversation History**: Browse and manage previous conversations
-- **Theme Support**: Automatic light/dark theme switching
-- **Responsive Design**: Adapts to different screen sizes
-- **Modular Architecture**: Easy to debug and enhance
+- **Unified chat experience:** send prompts, stream responses, and browse conversation history in one place.  
+- **Model selection:** pick from local or API models exposed by installed provider plugins (e.g., Ollama, OpenRouter). 
+- **Drop-in modularity:** add the chat module to any page via the **Page Builder** UI. No code required to compose experiences.  
+- **Decoupled services:** interacts with BrainDrive through **Service Bridges** (API, Events, Theme, Settings, Page Context, Plugin State) for forward-compatibility.
+- **1-minute dev cycle:** edit → build → refresh, powered by **Module Federation** and BrainDrive’s plugin system.
 
-## Installation
+## Quick Start (2 paths)
 
-1. Build the plugin:
+### A) One-click install via Plugin Manager
+
+1. Open **BrainDrive → Plugin Manager → Install Plugin**.
+
+   ![BrainDrive plugin manager](https://raw.githubusercontent.com/BrainDriveAI/BrainDrive-Core/94401c8adfed9df554b955adaee709adcd943a55/images/plugin-manager.png)
+
+2. Paste this repository URL and click **Install**.
+
+   ![Installing BrainDrive plugin](https://raw.githubusercontent.com/BrainDriveAI/BrainDrive-Core/94401c8adfed9df554b955adaee709adcd943a55/images/installing-plugin.png)
+
+3. Open **Page Builder**, drag the **BrainDriveChat** component onto a page, **Publish**, and start chatting.
+
+   ![Building a BrainDrive page](https://raw.githubusercontent.com/BrainDriveAI/BrainDrive-Core/94401c8adfed9df554b955adaee709adcd943a55/images/building-a-page.png)
+
+> The Plugin Manager fetches and registers plugins dynamically; no app rebuild required.
+
+### B) Local development & hot-reload
+
+> Use this path if you want to modify or contribute. It gives you a rapid edit→build→refresh cycle.
+
+1. **Clone & install**
    ```bash
-   chmod +x build.sh
-   ./build.sh
+   git clone https://github.com/YourOrg/BrainDrive-Chat-Plugin.git
+   cd BrainDrive-Chat-Plugin
+   npm install
    ```
+2. **Point build output to BrainDrive (optional but fastest)**  
+   In `webpack.config.js`, set `output.path` to your local BrainDrive plugins dir, e.g.:
+   ```
+   /path/to/BrainDrive-Core/backend/plugins/shared/BrainDriveChat/<version>/dist
+   ```
+   This lets BrainDrive load your freshly built `remoteEntry.js` without re-installing.
 
-2. The plugin will be built to `dist/remoteEntry.js`
+3. **Disable browser cache** in DevTools so the host app fetches the latest bundle on each refresh.
 
-3. Install using the BrainDrive plugin system
+4. **Build (watch)**
+   ```bash
+   npm run dev   # or: npm run build, then refresh the BrainDrive page
+   ```
+   Edit code → build completes → refresh the BrainDrive page → changes appear.
+
+
+## Usage
+
+1. Add **BrainDriveChat** to any page via **Page Builder**.  
+2. Choose a model (local or API) from the model selector (models come from installed provider plugins).  
+3. Chat normally; your conversation history persists with BrainDrive storage.  
 
 ## Configuration
 
