@@ -2,6 +2,8 @@
 
 The **BrainDrive Chat Plugin** is the default, modular chat experience for BrainDrive. It combines **chat**, **model selection**, **personas** and **conversation history** into a single, extensible UI you can customize, fork, and ship on your own terms. 
 
+![BrainDrive chat interface](https://raw.githubusercontent.com/BrainDriveAI/BrainDrive-Core/94401c8adfed9df554b955adaee709adcd943a55/images/chat-interface.png)
+
 Think **WordPress for AI**—install the core, add this plugin, and you’re chatting with local or API models in minutes. **Your AI. Your Rules.**
 
 ## Features
