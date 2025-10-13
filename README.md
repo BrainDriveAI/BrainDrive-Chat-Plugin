@@ -15,14 +15,6 @@ Think **WordPress for AI**—install the core, add this plugin, and you’re cha
 - **Responsive Design**: Adapts to different screen sizes
 - **Modular Architecture**: Easy to debug and enhance
 
-## Components Integrated
-
-This plugin combines the functionality of three separate components:
-
-1. **AI Prompt Chat V2** - Main chat interface with streaming support
-2. **Model Selection V2** - Dynamic model selection from providers
-3. **AI Chat History** - Conversation history management
-
 ## Installation
 
 1. Build the plugin:
