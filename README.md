@@ -1,17 +1,19 @@
 # BrainDriveChat Plugin
 
-The **BrainDrive Chat Plugin** is the default, modular chat experience for BrainDrive. It combines **chat**, **model selection**, **personas** and **conversation history** into a single, extensible UI you can customize, fork, and ship on your own terms. 
+The **BrainDrive Chat Plugin** is the default, modular chat experience for [BrainDrive](https://github.com/BrainDriveAI/BrainDrive-Core). It combines **chat**, **model selection**, **personas** and **conversation history** into a single, extensible UI you can customize, fork, and ship on your own terms. 
 
 ![BrainDrive chat interface](https://raw.githubusercontent.com/BrainDriveAI/BrainDrive-Core/94401c8adfed9df554b955adaee709adcd943a55/images/chat-interface.png)
 
-Think **WordPress for AI**—install the core, add this plugin, and you’re chatting with local or API models in minutes. **Your AI. Your Rules.**
+Think **WordPress for AI**—install the core, add this plugin, and you’re chatting with local or API models in minutes. 
+
+**Your AI. Your Rules.**
 
 ## Features
 
 - **Unified chat experience:** send prompts, stream responses, and browse conversation history in one place.  
-- **Model selection:** pick from local or API models exposed by installed provider plugins (e.g., Ollama, OpenRouter). 
+- **Model selection:** pick from local or API models exposed by installed provider plugins (e.g., [Ollama Plugin](https://github.com/BrainDriveAI/BrainDrive-Ollama-Plugin), [OpenRouter Plugin](https://github.com/BrainDriveAI/BrainDrive-Openrouter-Plugin)).
 - **Drop-in modularity:** add the chat module to any page via the **Page Builder** UI. No code required to compose experiences.  
-- **Decoupled services:** interacts with BrainDrive through **Service Bridges** (API, Events, Theme, Settings, Page Context, Plugin State) for forward-compatibility.
+- **Decoupled services:** interacts with BrainDrive through **[Service Bridges](https://github.com/BrainDriveAI/BrainDrive-Core/blob/main/docs/how-to/use-service-bridges.md)** (API, Events, Theme, Settings, Page Context, Plugin State) for forward-compatibility.
 - **1-minute dev cycle:** edit → build → refresh, powered by **Module Federation** and BrainDrive’s plugin system.
 
 ## Quick Start (2 paths)
@@ -75,30 +77,52 @@ The plugin supports the following configuration options:
 - `show_model_selection`: Show model selection dropdown
 - `show_conversation_history`: Show conversation history panel
 
-## Development
+## Development Guide
 
 ### Prerequisites
-
-- Node.js 16+
-- npm or yarn
+- **Node.js 16+**  
+- **Python 3.9+ (3.11 recommended)**  
+- **Git**  
+- BrainDrive [Installed](https://docs.braindrive.ai/core/INSTALL) & running locally (frontend & backend)
 
 ### Setup
-
 ```bash
+git clone https://github.com/YourOrg/BrainDrive-Chat-Plugin.git
+cd BrainDrive-Chat-Plugin
 npm install
 ```
 
-### Development Mode
-
+### Run in dev mode
 ```bash
 npm run dev
 ```
+- Keep **BrainDrive** running.  
+- Refresh your BrainDrive page to load the new bundle. The host uses **Module Federation** to load the plugin at runtime.
 
-### Build
-
+### Build for production
 ```bash
 npm run build
+# outputs ./dist/remoteEntry.js for Module Federation
 ```
+- Commit `dist/` in releases if you want frictionless installs via the Plugin Manager.
+
+---
+
+## Architecture Overview
+
+### How it fits into BrainDrive
+- **Core Frontend:** React + TypeScript + MUI  
+- **Core Backend:** Python + FastAPI + SQLite  
+- **Plugins:** Separate repos loaded at runtime via **Webpack Module Federation**; managed by a Python **Lifecycle Manager** that handles install/uninstall/repair/status with a universal API.
+
+This chat plugin is a federated frontend module that talks to BrainDrive via **Service Bridges**. You don’t call core internals directly; you call stable bridge contracts so updates don’t break your plugin.
+
+### Components, hooks, and state
+- **React components** render the header (model selector), history, and input areas.  
+- **Hooks** manage chat messages, streaming, and side effects.  
+- **State** (UI + conversation metadata) is persisted through BrainDrive services (e.g., Plugin State, Settings).
+
+> The modular design keeps changes “surgical”: tweak the input behavior without touching model selection; swap a renderer without breaking history.
 
 ## Architecture
 
