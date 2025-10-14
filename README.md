@@ -1,5 +1,8 @@
 # BrainDriveChat Plugin
 
+[![License](https://img.shields.io/badge/License-MIT%20License-green.svg)](LICENSE)
+[![BrainDrive](https://img.shields.io/badge/BrainDrive-Plugin-purple.svg)](https://github.com/BrainDriveAI/BrainDrive-Core)
+
 The BrainDrive Chat Plugin is the default, modular chat experience for [BrainDrive](https://github.com/BrainDriveAI/BrainDrive-Core). 
 
 It combines chat, model selection, personas and conversation history into a single, extensible UI you can customize, fork, and ship on your own terms. 
