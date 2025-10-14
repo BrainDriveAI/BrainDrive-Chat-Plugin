@@ -15,7 +15,7 @@ Think **WordPress for AI**—[install BrainDrive-Core](https://docs.braindrive.a
 - **Unified chat experience:** send prompts, stream responses, and browse conversation history in one place.  
 - **Model selection:** pick from local or API models exposed by installed provider plugins (e.g., [Ollama Plugin](https://github.com/BrainDriveAI/BrainDrive-Ollama-Plugin), [OpenRouter Plugin](https://github.com/BrainDriveAI/BrainDrive-Openrouter-Plugin)).
 - **Drop-in modularity:** add the chat module to any page via the **Page Builder** UI. No code required to compose experiences.  
-- **Decoupled services:** interacts with BrainDrive through [Service Bridges](https://github.com/BrainDriveAI/BrainDrive-Core/blob/main/docs/how-to/use-service-bridges.md) (API, Events, Theme, Settings, Page Context, Plugin State) for forward-compatibility.
+- **Decoupled services:** interacts with BrainDrive through [Service Bridges](https://github.com/BrainDriveAI/BrainDrive-Core/blob/main/docs/how-to/use-service-bridges.md) for forward-compatibility.
 - **1-minute dev cycle:** edit → build → refresh, powered by **Module Federation** and BrainDrive’s plugin system.
 
 ## Quick Start (2 paths)
@@ -42,7 +42,7 @@ Think **WordPress for AI**—[install BrainDrive-Core](https://docs.braindrive.a
 
 1. **Clone & install**
    ```bash
-   git clone https://github.com/YourOrg/BrainDrive-Chat-Plugin.git
+   git clone https://github.com/BrainDriveAI/BrainDrive-Chat-Plugin.git
    cd BrainDrive-Chat-Plugin
    npm install
    ```
@@ -67,17 +67,6 @@ Think **WordPress for AI**—[install BrainDrive-Core](https://docs.braindrive.a
 1. Add **BrainDriveChat** to any page via **Page Builder**.  
 2. Choose a model (local or API) from the model selector (models come from installed provider plugins).  
 3. Chat normally; your conversation history persists with BrainDrive storage.  
-
-## Configuration
-
-The plugin supports the following configuration options:
-
-- `initial_greeting`: Initial greeting message from AI
-- `enable_streaming`: Enable streaming responses by default
-- `max_conversation_history`: Maximum number of conversations to show
-- `auto_save_conversations`: Automatically save conversations
-- `show_model_selection`: Show model selection dropdown
-- `show_conversation_history`: Show conversation history panel
 
 ## Development Guide
 
