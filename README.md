@@ -4,7 +4,7 @@ The **BrainDrive Chat Plugin** is the default, modular chat experience for [Brai
 
 ![BrainDrive chat interface](https://raw.githubusercontent.com/BrainDriveAI/BrainDrive-Core/94401c8adfed9df554b955adaee709adcd943a55/images/chat-interface.png)
 
-Think **WordPress for AI**—install the core, add this plugin, and you’re chatting with local or API models in minutes. 
+Think **WordPress for AI**—[install BrainDrive-Core](https://docs.braindrive.ai/core/INSTALL), add this plugin, and you’re chatting with local or API models in minutes. 
 
 **Your AI. Your Rules.**
 
@@ -115,7 +115,7 @@ npm run build
 - **Core Backend:** Python + FastAPI + SQLite  
 - **Plugins:** Separate repos loaded at runtime via **Webpack Module Federation**; managed by a Python **Lifecycle Manager** that handles install/uninstall/repair/status with a universal API.
 
-This chat plugin is a federated frontend module that talks to BrainDrive via **Service Bridges**. You don’t call core internals directly; you call stable bridge contracts so updates don’t break your plugin.
+This chat plugin is a federated frontend module that talks to BrainDrive via **[Service Bridges](https://docs.braindrive.ai/core/how-to/use-service-bridges)**. You don’t call core internals directly; you call stable bridge contracts so updates don’t break your plugin.
 
 ### Components, hooks, and state
 - **React components** render the header (model selector), history, and input areas.  
@@ -160,12 +160,21 @@ The plugin integrates with the BrainDrive API for:
 
 ## License
 
-MIT License - see LICENSE file for details
-
-## Version
-
-1.0.0
+[MIT License](LICENSE) **Your AI. Your Rules**
 
 ## Author
 
-BrainDrive Team
+[BrainDrive.ai](https://www.braindrive.ai) Team
+
+## Resources
+
+[Owner's Manual](https://docs.braindrive.ai/core/how-to/use-braindrive) - Full overview of how to install, setup, and use your BrainDrive.
+[Community](https://community.braindrive.ai/) - For support, and to connect with other BrainDrive Owners.
+[Roadmap](https://docs.braindrive.ai/core/ROADMAP) - BrainDrive's 5 Phase vision for building a superior, user-owned alternative to Big Tech AI systems. 
+[Contributing](https://docs.braindrive.ai/core/CONTRIBUTING) - How to get involved. 
+
+Thank you for joining us on the journey away from Big Tech extraction, and towards individual freedom and empowerment. 
+
+
+
+
