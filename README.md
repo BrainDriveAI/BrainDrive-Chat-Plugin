@@ -1,6 +1,8 @@
 # BrainDriveChat Plugin
 
-The **BrainDrive Chat Plugin** is the default, modular chat experience for [BrainDrive](https://github.com/BrainDriveAI/BrainDrive-Core). It combines **chat**, **model selection**, **personas** and **conversation history** into a single, extensible UI you can customize, fork, and ship on your own terms. 
+The BrainDrive Chat Plugin is the default, modular chat experience for [BrainDrive](https://github.com/BrainDriveAI/BrainDrive-Core). 
+
+It combines chat, model selection, personas and conversation history into a single, extensible UI you can customize, fork, and ship on your own terms. 
 
 ![BrainDrive chat interface](https://raw.githubusercontent.com/BrainDriveAI/BrainDrive-Core/94401c8adfed9df554b955adaee709adcd943a55/images/chat-interface.png)
 
@@ -13,7 +15,7 @@ Think **WordPress for AI**—[install BrainDrive-Core](https://docs.braindrive.a
 - **Unified chat experience:** send prompts, stream responses, and browse conversation history in one place.  
 - **Model selection:** pick from local or API models exposed by installed provider plugins (e.g., [Ollama Plugin](https://github.com/BrainDriveAI/BrainDrive-Ollama-Plugin), [OpenRouter Plugin](https://github.com/BrainDriveAI/BrainDrive-Openrouter-Plugin)).
 - **Drop-in modularity:** add the chat module to any page via the **Page Builder** UI. No code required to compose experiences.  
-- **Decoupled services:** interacts with BrainDrive through **[Service Bridges](https://github.com/BrainDriveAI/BrainDrive-Core/blob/main/docs/how-to/use-service-bridges.md)** (API, Events, Theme, Settings, Page Context, Plugin State) for forward-compatibility.
+- **Decoupled services:** interacts with BrainDrive through [Service Bridges](https://github.com/BrainDriveAI/BrainDrive-Core/blob/main/docs/how-to/use-service-bridges.md) (API, Events, Theme, Settings, Page Context, Plugin State) for forward-compatibility.
 - **1-minute dev cycle:** edit → build → refresh, powered by **Module Federation** and BrainDrive’s plugin system.
 
 ## Quick Start (2 paths)
@@ -168,9 +170,9 @@ The plugin integrates with the BrainDrive API for:
 
 ## Resources
 
-[Owner's Manual](https://docs.braindrive.ai/core/how-to/use-braindrive) - Full overview of how to install, setup, and use your BrainDrive.
-[Community](https://community.braindrive.ai/) - For support, and to connect with other BrainDrive Owners.
-[Roadmap](https://docs.braindrive.ai/core/ROADMAP) - BrainDrive's 5 Phase vision for building a superior, user-owned alternative to Big Tech AI systems. 
+[Owner's Manual](https://docs.braindrive.ai/core/how-to/use-braindrive) - Full overview of how to install, setup, and use your BrainDrive.  
+[Community](https://community.braindrive.ai/) - For support, and to connect with other BrainDrive Owners.  
+[Roadmap](https://docs.braindrive.ai/core/ROADMAP) - BrainDrive's 5 Phase vision for building a superior, user-owned alternative to Big Tech AI systems.   
 [Contributing](https://docs.braindrive.ai/core/CONTRIBUTING) - How to get involved. 
 
 Thank you for joining us on the journey away from Big Tech extraction, and towards individual freedom and empowerment. 
