@@ -39,7 +39,9 @@ export class AIService {
     onConversationId: (id: string) => void,
     pageContext?: any, // New parameter for page context
     selectedPersona?: PersonaInfo,  // Add persona parameter
-    abortController?: AbortController // Add abort controller for cancellation
+    abortController?: AbortController, // Add abort controller for cancellation
+    contextMessages: { role: string; content: string }[] = [],
+    documentContextMode?: 'one-shot' | 'persist'
   ): Promise<boolean> {
     if (!this.services?.api) {
       throw new Error('API service not available');
@@ -47,6 +49,7 @@ export class AIService {
 
     // Create chat messages array with user's prompt
     const messages = [
+      ...contextMessages,
       { role: "user", content: prompt }
     ];
 
@@ -99,6 +102,11 @@ export class AIService {
           ...selectedPersona.model_settings
         };
       }
+    }
+
+    // Carry document context mode so the backend can decide whether to persist system messages
+    if (contextMessages.length > 0 && documentContextMode) {
+      requestParams.params.document_context_mode = documentContextMode;
     }
 
     try {

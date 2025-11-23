@@ -1,7 +1,7 @@
 import React from 'react';
 import { ModelInfo, ConversationInfo, PersonaInfo } from '../types';
 import { formatRelativeTime } from '../utils';
-import { ComposeIcon, ThreeDotsIcon, EditIcon, DeleteIcon } from '../icons';
+import { ComposeIcon, ThreeDotsIcon, EditIcon, DeleteIcon, UploadIcon } from '../icons';
 import SearchableDropdown, {
   DropdownOption
 } from './SearchableDropdown';
@@ -25,6 +25,7 @@ interface ChatHeaderProps {
   selectedConversation: ConversationInfo | null;
   onConversationSelect: (event: React.ChangeEvent<HTMLSelectElement>) => void;
   onNewChatClick: () => void;
+  onUploadClick: () => void;
   showConversationHistory: boolean;
   // Conversation actions
   onRenameSelectedConversation?: (id: string) => void;
@@ -33,6 +34,7 @@ interface ChatHeaderProps {
   // Loading states
   isLoading: boolean;
   isLoadingHistory: boolean;
+  uploadDisabled?: boolean;
 }
 
 interface ChatHeaderState {
@@ -297,6 +299,14 @@ class ChatHeader extends React.Component<ChatHeaderProps, ChatHeaderState> {
 
           {/* Right Section - New Chat Button */}
           <div className="header-actions-section">
+            <button
+              className="header-new-chat-button"
+              onClick={this.props.onUploadClick}
+              disabled={isLoading || this.props.uploadDisabled}
+              title="Upload document context"
+            >
+              <UploadIcon />
+            </button>
             <button
               className="header-new-chat-button"
               onClick={onNewChatClick}

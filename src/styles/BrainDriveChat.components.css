@@ -318,6 +318,134 @@
   color: var(--button-primary-bg);
 }
 
+/* Document mode dialog */
+.bd-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(6px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.bd-dialog {
+  width: 420px;
+  background: linear-gradient(135deg, #0f172a, #111827);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  color: #e5e7eb;
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  overflow: hidden;
+}
+
+.bd-dialog-header {
+  padding: 16px 18px 10px 18px;
+  font-weight: 700;
+  font-size: 16px;
+  color: #f8fafc;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.bd-dialog-body {
+  padding: 16px 18px 12px 18px;
+}
+
+.bd-dialog-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.bd-dialog-filename {
+  font-weight: 600;
+  color: #c7d2fe;
+  word-break: break-all;
+}
+
+.bd-dialog-details {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.bd-dialog-copy {
+  margin: 0 0 12px 0;
+  font-size: 13px;
+  color: #cbd5e1;
+}
+
+.bd-dialog-options {
+  display: grid;
+  gap: 10px;
+}
+
+.bd-option {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.bd-option-title {
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.bd-option-desc {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.bd-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 18px 16px 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.01);
+}
+
+.bd-dialog-btn {
+  border: none;
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 10px 14px;
+  font-size: 13px;
+  transition: transform 0.1s ease, opacity 0.1s ease, background 0.2s ease;
+}
+
+.bd-dialog-btn.primary {
+  background: linear-gradient(135deg, #4f46e5, #6366f1);
+  color: white;
+  box-shadow: 0 10px 30px rgba(79, 70, 229, 0.35);
+}
+
+.bd-dialog-btn.ghost {
+  background: rgba(255, 255, 255, 0.06);
+  color: #e5e7eb;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.bd-dialog-btn.text {
+  background: transparent;
+  color: #94a3b8;
+}
+
+.bd-dialog-btn:hover {
+  transform: translateY(-1px);
+  opacity: 0.95;
+}
+
+.bd-dialog-btn:active {
+  transform: translateY(0);
+  opacity: 0.9;
+}
+
 .header-icon-streaming.inactive:hover:not(:disabled) {
   background-color: var(--border-color);
   color: var(--text-color);
