@@ -31,6 +31,28 @@ export interface SupportedFileTypes {
   max_files_per_request: number;
 }
 
+export interface DocumentContextSegment {
+  index: number;
+  text: string;
+  char_count: number;
+}
+
+export interface DocumentContextResult {
+  filename: string;
+  file_type: string;
+  content_type: string;
+  file_size: number;
+  total_input_chars: number;
+  segments: DocumentContextSegment[];
+  segment_count: number;
+  truncated?: boolean;
+  truncation_notice?: string;
+  max_total_chars: number;
+  max_segments: number;
+  max_chars_per_segment: number;
+  processing_success: boolean;
+}
+
 export class DocumentService {
   private apiService: ApiService | null;
 
@@ -94,6 +116,38 @@ export class DocumentService {
       return response.data || response;
     } catch (error) {
       console.error(`❌ Error processing document ${file.name}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Process a text/markdown document specifically for context seeding.
+   * Limits supported types to text-based files.
+   */
+  async processTextContext(file: File): Promise<DocumentContextResult> {
+    if (!this.apiService) {
+      throw new Error('API service not available');
+    }
+
+    const allowedTypes = ['text/plain', 'text/markdown', 'text/x-markdown'];
+    const extension = this.getFileExtension(file.name);
+    const allowedExtensions = ['txt', 'md', 'markdown'];
+
+    if (!allowedTypes.includes(file.type) && !allowedExtensions.includes(extension)) {
+      throw new Error('Only text or Markdown files are supported for context seeding.');
+    }
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await this.apiService.post('/api/v1/documents/process-text-context', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+
+      return response.data || response;
+    } catch (error) {
+      console.error(`Error processing text context ${file.name}:`, error);
       throw error;
     }
   }
@@ -232,5 +286,25 @@ export class DocumentService {
     context += `[END MULTIPLE DOCUMENTS CONTEXT]`;
     
     return context;
+  }
+
+  /**
+   * Format segmented context for system prompt injection.
+   */
+  formatSegmentsForChatContext(result: DocumentContextResult): string {
+    const header = `[DOCUMENT CONTEXT - ${result.filename}]\nSegments: ${result.segment_count}\nTotal Input Chars: ${result.total_input_chars}\n`;
+    const body = result.segments.map((seg: DocumentContextSegment) => {
+      return `### Segment ${seg.index}\n${seg.text}`;
+    }).join('\n\n');
+
+    const footer = result.truncated ? `\n\n[TRUNCATED to fit limits]` : '';
+    return `${header}\n${body}${footer}\n[END DOCUMENT CONTEXT]`;
+  }
+
+  /**
+   * Extract file extension.
+   */
+  private getFileExtension(filename: string): string {
+    return filename.slice((filename.lastIndexOf('.') - 1 >>> 0) + 2).toLowerCase();
   }
 }

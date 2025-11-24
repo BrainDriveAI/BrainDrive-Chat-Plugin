@@ -7,7 +7,8 @@ import {
   ModelInfo,
   PersonaInfo,
   ConversationWithPersona,
-  DocumentProcessingResult
+  DocumentProcessingResult,
+  DocumentContextResult
 } from './types';
 import {
   generateId
@@ -121,6 +122,9 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       
       // Document processing state
       documentContext: '',
+      documentContextMode: null,
+      documentContextInjectedConversationId: null,
+      documentContextInfo: null,
       isProcessingDocuments: false,
       
       // Scroll state
@@ -295,39 +299,16 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
    * Get saved streaming mode from settings (page-specific with global fallback)
    */
   getSavedStreamingMode = async (): Promise<boolean | null> => {
-    try {
-      if (this.props.services?.settings?.getSetting) {
-        // Try page-specific setting first
-        const pageSpecificKey = this.getSettingKey(this.STREAMING_SETTING_KEY);
-        let savedValue = await this.props.services.settings.getSetting(pageSpecificKey);
-        
-        // Fallback to global setting if page-specific doesn't exist
-        if (savedValue === null || savedValue === undefined) {
-          savedValue = await this.props.services.settings.getSetting(this.STREAMING_SETTING_KEY);
-        }
-        
-        if (typeof savedValue === 'boolean') {
-          return savedValue;
-        }
-      }
-      return null;
-    } catch (error) {
-      return null;
-    }
+    // Streaming is always on; skip settings lookups to avoid missing-definition errors
+    return null;
   }
 
   /**
    * Load saved streaming mode from settings
    */
   loadSavedStreamingMode = async (): Promise<void> => {
-    try {
-      const savedStreamingMode = await this.getSavedStreamingMode();
-      if (savedStreamingMode !== null) {
-        this.setState({ useStreaming: savedStreamingMode });
-      }
-    } catch (error) {
-      // Error loading streaming mode, use default
-    }
+    // Force streaming on by default and avoid settings service
+    this.setState({ useStreaming: true });
   }
 
   /**
@@ -1726,8 +1707,8 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     // Create a hidden file input and trigger it
     const fileInput = document.createElement('input');
     fileInput.type = 'file';
-    fileInput.multiple = true;
-    fileInput.accept = '.pdf,.txt,.csv,.json,.xlsx,.xls,.md,.xml,.html';
+    fileInput.multiple = false;
+    fileInput.accept = '.txt,.md,.markdown';
     fileInput.style.display = 'none';
     
     fileInput.onchange = async (event) => {
@@ -1742,34 +1723,21 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       this.setState({ isProcessingDocuments: true });
 
       try {
-        const fileArray = Array.from(files);
-        const results: DocumentProcessingResult[] = [];
+        const file = files[0];
+        // Restrict to text/markdown for context seeding
+        const allowedTypes = ['text/plain', 'text/markdown', 'text/x-markdown'];
+        const extension = file.name.split('.').pop()?.toLowerCase() || '';
+        const allowedExtensions = ['txt', 'md', 'markdown'];
 
-        // Process each file
-        for (const file of fileArray) {
-          try {
-            // Validate file
-            const validation = await this.documentService.validateFile(file);
-            if (!validation.valid) {
-              this.setState({ error: `File ${file.name}: ${validation.error}` });
-              continue;
-            }
-
-            // Process file
-            const result = await this.documentService.processDocument(file);
-            if (result.processing_success) {
-              results.push(result);
-            } else {
-              this.setState({ error: `Failed to process ${file.name}: ${result.error}` });
-            }
-          } catch (error) {
-            this.setState({ error: `Error processing ${file.name}: ${error instanceof Error ? error.message : 'Unknown error'}` });
-          }
+        if (!allowedTypes.includes(file.type) && !allowedExtensions.includes(extension)) {
+          this.setState({ error: 'Only text or Markdown files are supported for chat context seeding.' });
+          return;
         }
 
-        if (results.length > 0) {
-          this.handleDocumentsProcessed(results);
-        }
+        // Process the text file with chunking
+        const contextResult = await this.documentService!.processTextContext(file);
+
+        this.promptDocumentMode(contextResult);
       } catch (error) {
         this.setState({ error: `Error processing documents: ${error instanceof Error ? error.message : 'Unknown error'}` });
       } finally {
@@ -1780,6 +1748,127 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     document.body.appendChild(fileInput);
     fileInput.click();
     document.body.removeChild(fileInput);
+  };
+
+  /**
+   * Handle processed text/markdown context result
+   */
+  handleDocumentContextProcessed = (result: DocumentContextResult, mode: 'one-shot' | 'persist') => {
+    const documentContext = this.documentService!.formatSegmentsForChatContext(result);
+    const info = {
+      filename: result.filename,
+      segmentCount: result.segment_count,
+      totalChars: result.total_input_chars,
+      truncated: result.truncated,
+      mode
+    };
+
+    this.setState({
+      documentContext,
+      documentContextMode: mode,
+      documentContextInjectedConversationId: null,
+      documentContextInfo: info
+    }, () => {
+      const documentMessage: ChatMessage = {
+        id: generateId('documents'),
+        sender: 'ai',
+        content: '',
+        timestamp: new Date().toISOString(),
+        isDocumentContext: true,
+        documentData: {
+          context: documentContext,
+          filename: result.filename,
+          segmentCount: result.segment_count,
+          totalChars: result.total_input_chars,
+          truncated: result.truncated,
+          mode
+        }
+      };
+
+      this.addMessageToChat(documentMessage);
+    });
+  };
+
+  /**
+   * Prompt user for document mode with a custom dialog
+   */
+  promptDocumentMode = (contextResult: DocumentContextResult) => {
+    // Render a lightweight modal overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'bd-dialog-backdrop';
+
+    const modal = document.createElement('div');
+    modal.className = 'bd-dialog';
+
+    const header = document.createElement('div');
+    header.className = 'bd-dialog-header';
+    header.innerText = 'Use this document as chat context?';
+
+    const body = document.createElement('div');
+    body.className = 'bd-dialog-body';
+    body.innerHTML = `
+      <div class="bd-dialog-meta">
+        <div class="bd-dialog-filename">${contextResult.filename}</div>
+        <div class="bd-dialog-details">
+          ${contextResult.segment_count} segments • ${contextResult.total_input_chars} chars${contextResult.truncated ? ' • truncated' : ''}
+        </div>
+      </div>
+      <p class="bd-dialog-copy">
+        Choose how you want to use this context.
+      </p>
+      <div class="bd-dialog-options">
+        <div class="bd-option">
+          <div class="bd-option-title">Save to conversation</div>
+          <div class="bd-option-desc">Reuse on reopen; adds a system message to history.</div>
+        </div>
+        <div class="bd-option">
+          <div class="bd-option-title">One-shot only</div>
+          <div class="bd-option-desc">Send once for this turn; not saved to history.</div>
+        </div>
+      </div>
+    `;
+
+    const footer = document.createElement('div');
+    footer.className = 'bd-dialog-footer';
+
+    const persistBtn = document.createElement('button');
+    persistBtn.className = 'bd-dialog-btn primary';
+    persistBtn.innerText = 'Save to conversation';
+
+    const oneShotBtn = document.createElement('button');
+    oneShotBtn.className = 'bd-dialog-btn ghost';
+    oneShotBtn.innerText = 'One-shot only';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'bd-dialog-btn text';
+    cancelBtn.innerText = 'Cancel';
+
+    const cleanup = () => {
+      document.body.removeChild(overlay);
+    };
+
+    persistBtn.onclick = () => {
+      cleanup();
+      this.handleDocumentContextProcessed(contextResult, 'persist');
+    };
+
+    oneShotBtn.onclick = () => {
+      cleanup();
+      this.handleDocumentContextProcessed(contextResult, 'one-shot');
+    };
+
+    cancelBtn.onclick = cleanup;
+
+    footer.appendChild(cancelBtn);
+    footer.appendChild(oneShotBtn);
+    footer.appendChild(persistBtn);
+
+    modal.appendChild(header);
+    modal.appendChild(body);
+    modal.appendChild(footer);
+    overlay.appendChild(modal);
+
+    document.body.appendChild(overlay);
   };
 
   /**
@@ -2344,11 +2433,6 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       // Perform web search if enabled
       let enhancedPrompt = prompt;
       
-      // Add document context if available (only for AI, not for chat history)
-      if (this.state.documentContext) {
-        enhancedPrompt = `${this.state.documentContext}\n\nUser Question: ${prompt}`;
-      }
-      
       if (this.state.useWebSearch && this.searchService) {
         try {
           this.setState({ isSearching: true });
@@ -2442,6 +2526,11 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       
       // Track the current response content for proper abort handling
       let currentResponseContent = '';
+      const shouldInjectDocumentContext = !!this.state.documentContext &&
+        (!this.state.documentContextInjectedConversationId || this.state.documentContextInjectedConversationId !== this.state.conversation_id);
+      const contextMessages = shouldInjectDocumentContext
+        ? [{ role: 'system', content: this.state.documentContext }]
+        : [];
       
       // Handle streaming chunks
       const onChunk = (chunk: string) => {
@@ -2464,7 +2553,10 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       // Handle conversation ID updates
       const onConversationId = (id: string) => {
         console.log(`🔄 Conversation ID received: ${id}`);
-        this.setState({ conversation_id: id }, () => {
+        this.setState(prev => ({
+          conversation_id: id,
+          documentContextInjectedConversationId: shouldInjectDocumentContext ? id : prev.documentContextInjectedConversationId
+        }), () => {
           console.log(`✅ Conversation ID updated in state: ${this.state.conversation_id}`);
           // Refresh conversations list after a small delay to ensure backend has processed the conversation
           setTimeout(() => {
@@ -2487,8 +2579,17 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         onConversationId,
         pageContext,
         this.state.selectedPersona || undefined,
-        this.currentStreamingAbortController
+        this.currentStreamingAbortController,
+        contextMessages,
+        this.state.documentContextMode || undefined
       );
+
+      if (shouldInjectDocumentContext && this.state.conversation_id && !this.state.documentContextInjectedConversationId) {
+        const convId = this.state.conversation_id;
+        this.setState(prev => ({
+          documentContextInjectedConversationId: prev.documentContextInjectedConversationId || convId
+        }));
+      }
       
       // Finalize the message
       this.setState(prevState => {
@@ -2586,7 +2687,8 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       isLoadingPersonas,
       showPersonaSelection,
       useWebSearch,
-      isSearching
+      isSearching,
+      isProcessingDocuments
     } = this.state;
     
     const { promptQuestion } = this.props;
@@ -2610,11 +2712,13 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
             selectedConversation={selectedConversation}
             onConversationSelect={this.handleConversationSelect}
             onNewChatClick={this.handleNewChatClick}
+            onUploadClick={this.handleFileUploadClick}
             showConversationHistory={true}
             onRenameSelectedConversation={(id) => this.handleRenameConversation(id)}
             onDeleteSelectedConversation={(id) => this.handleDeleteConversation(id)}
             isLoading={isLoading}
             isLoadingHistory={isLoadingHistory}
+            uploadDisabled={isProcessingDocuments}
           />
           
           {/* Show initializing state or chat content */}

@@ -25,8 +25,13 @@ export interface ChatMessage {
   // Document context
   isDocumentContext?: boolean;
   documentData?: {
-    results: DocumentProcessingResult[];
+    results?: DocumentProcessingResult[];
     context: string;
+    filename?: string;
+    segmentCount?: number;
+    totalChars?: number;
+    truncated?: boolean;
+    mode?: 'one-shot' | 'persist';
   };
   // Markdown toggle
   showRawMarkdown?: boolean;
@@ -128,6 +133,28 @@ export interface DocumentProcessingResult {
   text_length: number;
   processing_success: boolean;
   error?: string;
+}
+
+export interface DocumentContextSegment {
+  index: number;
+  text: string;
+  char_count: number;
+}
+
+export interface DocumentContextResult {
+  filename: string;
+  file_type: string;
+  content_type: string;
+  file_size: number;
+  total_input_chars: number;
+  segments: DocumentContextSegment[];
+  segment_count: number;
+  truncated?: boolean;
+  truncation_notice?: string;
+  max_total_chars: number;
+  max_segments: number;
+  max_chars_per_segment: number;
+  processing_success: boolean;
 }
 
 export interface MultipleDocumentProcessingResult {
@@ -243,6 +270,15 @@ export interface BrainDriveChatState {
   
   // Document processing state
   documentContext: string;
+  documentContextMode: 'one-shot' | 'persist' | null;
+  documentContextInjectedConversationId: string | null;
+  documentContextInfo?: {
+    filename: string;
+    segmentCount: number;
+    totalChars: number;
+    truncated?: boolean;
+    mode?: 'one-shot' | 'persist';
+  } | null;
   isProcessingDocuments: boolean;
   
   // Scroll state

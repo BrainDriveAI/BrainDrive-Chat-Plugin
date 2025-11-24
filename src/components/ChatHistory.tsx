@@ -149,6 +149,9 @@ class ChatHistory extends React.Component<ChatHistoryProps, ChatHistoryState> {
 
     const isExpanded = this.state.expandedDocumentContext.has(message.id);
     const { results } = documentData;
+    const filename = documentData.filename || (results && results.length === 1 ? results[0].filename : undefined) || 'Document';
+    const segmentCount = documentData.segmentCount || (results ? results.length : undefined);
+    const totalChars = documentData.totalChars || (results && results[0] ? results[0].text_length : undefined);
 
     return (
       <div key={message.id} className="message message-ai message-document-context">
@@ -158,13 +161,13 @@ class ChatHistory extends React.Component<ChatHistoryProps, ChatHistoryState> {
               <div className="document-context-summary">
                 <span className="document-icon">📄</span>
                 <span className="document-filename">
-                  {results.length === 1 ? results[0].filename : `${results.length} documents`}
+                  {filename}
                 </span>
                 <span className="document-info">
-                  {results.length === 1 
-                    ? `${results[0].file_type.toUpperCase()} • ${results[0].text_length} chars`
-                    : `${results.length} files processed`
-                  }
+                  {segmentCount ? `${segmentCount} segment${segmentCount > 1 ? 's' : ''}` : ''}
+                  {totalChars ? ` • ${totalChars} chars` : ''}
+                  {documentData.truncated ? ' • truncated' : ''}
+                  {documentData.mode ? ` • ${documentData.mode}` : ''}
                 </span>
               </div>
               <button
