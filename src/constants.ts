@@ -32,7 +32,7 @@ export const SEARCH_CONFIG = {
 
 // File Upload Configuration
 export const FILE_CONFIG = {
-  ACCEPTED_EXTENSIONS: '.pdf,.txt,.csv,.json,.xlsx,.xls,.md,.xml,.html',
+  ACCEPTED_EXTENSIONS: '.pdf,.txt,.log,.csv,.json,.xlsx,.xls,.ods,.md,.markdown,.xml,.html,.htm,.xhtml,.docx,.doc,.pptx,.ppt,.rtf,.eml,.epub',
   MAX_FILE_SIZE_MB: 10,
 } as const;
 

@@ -1,20 +1,34 @@
 /**
  * Document Processing Service
- * 
+ *
  * This service handles document uploads and text extraction for chat context.
  * It provides methods to process various file types and extract text content.
  */
 
 import { ApiService } from '../types';
 
+export interface DocumentContextSegment {
+  index: number;
+  text: string;
+  char_count: number;
+}
+
 export interface DocumentProcessingResult {
-  filename: string;
+  filename: string | null;
   file_type: string;
   content_type: string;
-  file_size: number;
+  file_size: number | null;
   extracted_text: string;
   text_length: number;
   processing_success: boolean;
+  detected_type?: string;
+  metadata?: Record<string, any>;
+  warnings?: string[];
+  chunks?: DocumentContextSegment[];
+  chunk_metadata?: {
+    truncated?: boolean;
+    total_chars?: number;
+  };
   error?: string;
 }
 
@@ -29,19 +43,15 @@ export interface SupportedFileTypes {
   supported_types: Record<string, string>;
   max_file_size_mb: number;
   max_files_per_request: number;
-}
-
-export interface DocumentContextSegment {
-  index: number;
-  text: string;
-  char_count: number;
+  canonical_types?: string[];
+  extensions?: string[];
 }
 
 export interface DocumentContextResult {
-  filename: string;
+  filename: string | null;
   file_type: string;
   content_type: string;
-  file_size: number;
+  file_size: number | null;
   total_input_chars: number;
   segments: DocumentContextSegment[];
   segment_count: number;
@@ -50,7 +60,16 @@ export interface DocumentContextResult {
   max_total_chars: number;
   max_segments: number;
   max_chars_per_segment: number;
+  overlap_chars?: number;
+  warnings?: string[];
   processing_success: boolean;
+}
+
+export interface DocumentProcessOptions {
+  includeChunks?: boolean;
+  maxChars?: number;
+  preserveLayout?: boolean;
+  stripBoilerplate?: boolean;
 }
 
 export class DocumentService {
@@ -74,6 +93,29 @@ export class DocumentService {
     return this.apiService;
   }
 
+  private buildProcessParams(options?: DocumentProcessOptions): Record<string, any> {
+    if (!options) return {};
+    const params: Record<string, any> = {
+      include_chunks: options.includeChunks,
+      max_chars: options.maxChars,
+      preserve_layout: options.preserveLayout,
+      strip_boilerplate: options.stripBoilerplate,
+    };
+
+    Object.keys(params).forEach((key) => {
+      if (params[key] === undefined) {
+        delete params[key];
+      }
+    });
+
+    return params;
+  }
+
+  private normalizeExtensions(extensions: string[] | undefined): string[] {
+    if (!extensions || extensions.length === 0) return [];
+    return extensions.map((ext) => (ext.startsWith('.') ? ext : `.${ext}`));
+  }
+
   /**
    * Get supported file types and limits
    */
@@ -94,25 +136,22 @@ export class DocumentService {
   /**
    * Process a single document and extract text
    */
-  async processDocument(file: File): Promise<DocumentProcessingResult> {
+  async processDocument(file: File, options?: DocumentProcessOptions): Promise<DocumentProcessingResult> {
     if (!this.apiService) {
       throw new Error('API service not available');
     }
 
     try {
-      // Create FormData for file upload
       const formData = new FormData();
       formData.append('file', file);
-
-      console.log(`📄 Processing document: ${file.name} (${file.type}, ${file.size} bytes)`);
 
       const response = await this.apiService.post('/api/v1/documents/process', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
+        params: this.buildProcessParams(options),
       });
 
-      console.log(`✅ Document processed successfully: ${file.name}`);
       return response.data || response;
     } catch (error) {
       console.error(`❌ Error processing document ${file.name}:`, error);
@@ -127,14 +166,6 @@ export class DocumentService {
   async processTextContext(file: File): Promise<DocumentContextResult> {
     if (!this.apiService) {
       throw new Error('API service not available');
-    }
-
-    const allowedTypes = ['text/plain', 'text/markdown', 'text/x-markdown'];
-    const extension = this.getFileExtension(file.name);
-    const allowedExtensions = ['txt', 'md', 'markdown'];
-
-    if (!allowedTypes.includes(file.type) && !allowedExtensions.includes(extension)) {
-      throw new Error('Only text or Markdown files are supported for context seeding.');
     }
 
     try {
@@ -155,7 +186,7 @@ export class DocumentService {
   /**
    * Process multiple documents and extract text
    */
-  async processMultipleDocuments(files: File[]): Promise<MultipleDocumentProcessingResult> {
+  async processMultipleDocuments(files: File[], options?: DocumentProcessOptions): Promise<MultipleDocumentProcessingResult> {
     if (!this.apiService) {
       throw new Error('API service not available');
     }
@@ -169,22 +200,19 @@ export class DocumentService {
     }
 
     try {
-      // Create FormData for multiple file uploads
       const formData = new FormData();
       files.forEach(file => {
         formData.append('files', file);
       });
 
-      console.log(`📄 Processing ${files.length} documents`);
-
       const response = await this.apiService.post('/api/v1/documents/process-multiple', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
+        params: this.buildProcessParams(options),
       });
 
       const result = response.data || response;
-      console.log(`✅ Documents processed: ${result.successful_files}/${result.total_files} successful`);
       return result;
     } catch (error) {
       console.error('❌ Error processing multiple documents:', error);
@@ -198,6 +226,11 @@ export class DocumentService {
   async isFileTypeSupported(file: File): Promise<boolean> {
     try {
       const supportedTypes = await this.getSupportedFileTypes();
+      const extension = this.getFileExtension(file.name);
+      if (supportedTypes.extensions && supportedTypes.extensions.length > 0) {
+        const normalized = this.normalizeExtensions(supportedTypes.extensions).map((ext) => ext.replace('.', ''));
+        return normalized.includes(extension);
+      }
       return file.type in supportedTypes.supported_types;
     } catch (error) {
       console.error('Error checking file type support:', error);
@@ -224,18 +257,19 @@ export class DocumentService {
    */
   async validateFile(file: File): Promise<{ valid: boolean; error?: string }> {
     try {
-      // Check file type
       const typeSupported = await this.isFileTypeSupported(file);
       if (!typeSupported) {
         const supportedTypes = await this.getSupportedFileTypes();
-        const supportedTypesList = Object.keys(supportedTypes.supported_types).join(', ');
+        const extensions = this.normalizeExtensions(supportedTypes.extensions || []);
+        const supportedTypesList = extensions.length > 0
+          ? extensions.join(', ')
+          : Object.keys(supportedTypes.supported_types).join(', ');
         return {
           valid: false,
           error: `Unsupported file type. Supported types: ${supportedTypesList}`
         };
       }
 
-      // Check file size
       const sizeValid = await this.isFileSizeValid(file);
       if (!sizeValid) {
         const supportedTypes = await this.getSupportedFileTypes();
@@ -259,13 +293,13 @@ export class DocumentService {
    */
   formatTextForChatContext(result: DocumentProcessingResult): string {
     const { filename, file_type, extracted_text, text_length } = result;
-    
-    let context = `[DOCUMENT CONTEXT - ${filename.toUpperCase()}]\n`;
+
+    let context = `[DOCUMENT CONTEXT - ${String(filename).toUpperCase()}]\n`;
     context += `File Type: ${file_type}\n`;
     context += `Text Length: ${text_length} characters\n`;
     context += `Content:\n\n${extracted_text}\n\n`;
     context += `[END DOCUMENT CONTEXT]`;
-    
+
     return context;
   }
 
@@ -275,16 +309,16 @@ export class DocumentService {
   formatMultipleTextsForChatContext(results: DocumentProcessingResult[]): string {
     let context = `[MULTIPLE DOCUMENTS CONTEXT]\n`;
     context += `Total Documents: ${results.length}\n\n`;
-    
+
     results.forEach((result, index) => {
       context += `--- Document ${index + 1}: ${result.filename} ---\n`;
       context += `Type: ${result.file_type}\n`;
       context += `Length: ${result.text_length} characters\n`;
       context += `Content:\n${result.extracted_text}\n\n`;
     });
-    
+
     context += `[END MULTIPLE DOCUMENTS CONTEXT]`;
-    
+
     return context;
   }
 

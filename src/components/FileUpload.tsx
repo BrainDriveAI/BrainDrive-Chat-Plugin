@@ -1,6 +1,7 @@
 import React from 'react';
 import { DocumentService, DocumentProcessingResult, SupportedFileTypes } from '../services';
 import { ApiService } from '../types';
+import { FILE_CONFIG } from '../constants';
 import {
   UploadIcon
 } from '../icons';
@@ -41,7 +42,7 @@ class FileUpload extends React.Component<FileUploadProps, FileUploadState> {
       if (this.props.apiService) {
         const service = new DocumentService(this.props.apiService);
         this.setState({ documentService: service });
-        
+
         const types = await service.getSupportedFileTypes();
         this.setState({ supportedTypes: types });
       }
@@ -108,13 +109,29 @@ class FileUpload extends React.Component<FileUploadProps, FileUploadState> {
   };
 
   getAcceptedFileTypes = () => {
-    if (!this.state.supportedTypes) return '';
-    return Object.keys(this.state.supportedTypes.supported_types).join(',');
+    const { supportedTypes } = this.state;
+    if (!supportedTypes) return FILE_CONFIG.ACCEPTED_EXTENSIONS;
+
+    if (supportedTypes.extensions && supportedTypes.extensions.length > 0) {
+      return supportedTypes.extensions
+        .map(ext => ext.startsWith('.') ? ext : `.${ext}`)
+        .join(',');
+    }
+
+    const mimeList = Object.keys(supportedTypes.supported_types || {});
+    return mimeList.length > 0 ? mimeList.join(',') : FILE_CONFIG.ACCEPTED_EXTENSIONS;
   };
 
   render() {
     const { disabled, className = '' } = this.props;
     const { isProcessing, supportedTypes } = this.state;
+
+    const supportedList = supportedTypes?.extensions?.length
+      ? supportedTypes.extensions.map(ext => ext.startsWith('.') ? ext : `.${ext}`)
+      : supportedTypes?.canonical_types || [];
+    const supportedText = supportedList && supportedList.length > 0
+      ? supportedList.join(', ')
+      : 'PDF, DOCX, PPTX, XLSX, CSV, JSON, TXT, MD, HTML, XML, EML, EPUB';
 
     return (
       <div className={`file-upload-container ${className}`}>
@@ -127,12 +144,12 @@ class FileUpload extends React.Component<FileUploadProps, FileUploadState> {
           style={{ display: 'none' }}
           disabled={disabled || isProcessing}
         />
-        
+
         <button
           onClick={this.handleClick}
           disabled={disabled || isProcessing}
           className="file-upload-button"
-          title="Upload documents (PDF, TXT, CSV, JSON, Excel)"
+          title={`Upload documents (${supportedText})`}
         >
           {isProcessing ? (
             <div className="file-upload-loading">
@@ -150,7 +167,7 @@ class FileUpload extends React.Component<FileUploadProps, FileUploadState> {
         {supportedTypes && (
           <div className="file-upload-info">
             <small>
-              Supported: PDF, TXT, CSV, JSON, Excel • Max: {supportedTypes.max_file_size_mb}MB • Up to {supportedTypes.max_files_per_request} files
+              Supported: {supportedText} • Max: {supportedTypes.max_file_size_mb}MB • Up to {supportedTypes.max_files_per_request} files
             </small>
           </div>
         )}

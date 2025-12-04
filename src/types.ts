@@ -125,13 +125,21 @@ export interface ApiResponse {
 
 // Document processing interfaces
 export interface DocumentProcessingResult {
-  filename: string;
+  filename: string | null;
   file_type: string;
   content_type: string;
-  file_size: number;
+  file_size: number | null;
   extracted_text: string;
   text_length: number;
   processing_success: boolean;
+  detected_type?: string;
+  metadata?: Record<string, any>;
+  warnings?: string[];
+  chunks?: DocumentContextSegment[];
+  chunk_metadata?: {
+    truncated?: boolean;
+    total_chars?: number;
+  };
   error?: string;
 }
 
@@ -142,10 +150,10 @@ export interface DocumentContextSegment {
 }
 
 export interface DocumentContextResult {
-  filename: string;
+  filename: string | null;
   file_type: string;
   content_type: string;
-  file_size: number;
+  file_size: number | null;
   total_input_chars: number;
   segments: DocumentContextSegment[];
   segment_count: number;
@@ -154,6 +162,8 @@ export interface DocumentContextResult {
   max_total_chars: number;
   max_segments: number;
   max_chars_per_segment: number;
+  overlap_chars?: number;
+  warnings?: string[];
   processing_success: boolean;
 }
 
@@ -168,8 +178,9 @@ export interface SupportedFileTypes {
   supported_types: Record<string, string>;
   max_file_size_mb: number;
   max_files_per_request: number;
+  canonical_types?: string[];
+  extensions?: string[];
 }
-
 // Service interfaces
 export interface ApiService {
   get: (url: string, options?: any) => Promise<ApiResponse>;

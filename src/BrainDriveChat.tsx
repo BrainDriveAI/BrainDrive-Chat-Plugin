@@ -21,7 +21,8 @@ import {
   API_CONFIG,
   ERROR_MESSAGES,
   SUCCESS_MESSAGES,
-  PROVIDER_SETTINGS_ID_MAP
+  PROVIDER_SETTINGS_ID_MAP,
+  FILE_CONFIG
 } from './constants';
 
 // Import modular components
@@ -1298,6 +1299,28 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   };
 
   /**
+   * Parse a stored message to reconstruct document context cards when loading history.
+   */
+  parseDocumentContext = (content: string) => {
+    if (!content) return null;
+    const headerMatch = content.match(/\[DOCUMENT CONTEXT\s*-\s*(.+?)\]/i);
+    if (!headerMatch) return null;
+
+    const filename = headerMatch[1]?.trim();
+    const segmentMatch = content.match(/Segments:\s*(\d+)/i);
+    const totalCharsMatch = content.match(/Total Input Chars:\s*(\d+)/i);
+    const truncated = /\[TRUNCATED/i.test(content);
+
+    return {
+      context: content.trim(),
+      filename,
+      segmentCount: segmentMatch ? parseInt(segmentMatch[1], 10) : undefined,
+      totalChars: totalCharsMatch ? parseInt(totalCharsMatch[1], 10) : undefined,
+      truncated,
+    };
+  };
+
+  /**
    * Load conversation history from the API
    */
   loadConversationHistory = async (conversationId: string) => {
@@ -1330,13 +1353,19 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       const messages: ChatMessage[] = [];
       
       if (response && response.messages && Array.isArray(response.messages)) {
-        // Convert API message format to ChatMessage format
-        messages.push(...response.messages.map((msg: any) => ({
-          id: msg.id || generateId('history'),
-          sender: msg.sender === 'llm' ? 'ai' : 'user' as 'ai' | 'user',
-          content: this.cleanMessageContent(msg.message),
-          timestamp: msg.created_at
-        })));
+        // Convert API message format to ChatMessage format, including reconstructed document context cards
+        messages.push(...response.messages.map((msg: any) => {
+          const rawContent: string = msg.message || '';
+          const parsedDoc = this.parseDocumentContext(rawContent);
+
+          return {
+            id: msg.id || generateId('history'),
+            sender: msg.sender === 'llm' ? 'ai' : 'user' as 'ai' | 'user',
+            content: parsedDoc ? rawContent.trim() : this.cleanMessageContent(rawContent),
+            timestamp: msg.created_at,
+            ...(parsedDoc ? { isDocumentContext: true, documentData: parsedDoc } : {})
+          };
+        }));
       }
       
       // Update state
@@ -1708,7 +1737,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     const fileInput = document.createElement('input');
     fileInput.type = 'file';
     fileInput.multiple = false;
-    fileInput.accept = '.txt,.md,.markdown';
+    fileInput.accept = FILE_CONFIG.ACCEPTED_EXTENSIONS;
     fileInput.style.display = 'none';
     
     fileInput.onchange = async (event) => {
@@ -1724,17 +1753,8 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
 
       try {
         const file = files[0];
-        // Restrict to text/markdown for context seeding
-        const allowedTypes = ['text/plain', 'text/markdown', 'text/x-markdown'];
-        const extension = file.name.split('.').pop()?.toLowerCase() || '';
-        const allowedExtensions = ['txt', 'md', 'markdown'];
 
-        if (!allowedTypes.includes(file.type) && !allowedExtensions.includes(extension)) {
-          this.setState({ error: 'Only text or Markdown files are supported for chat context seeding.' });
-          return;
-        }
-
-        // Process the text file with chunking
+        // Process the file with chunking
         const contextResult = await this.documentService!.processTextContext(file);
 
         this.promptDocumentMode(contextResult);
@@ -1756,7 +1776,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   handleDocumentContextProcessed = (result: DocumentContextResult, mode: 'one-shot' | 'persist') => {
     const documentContext = this.documentService!.formatSegmentsForChatContext(result);
     const info = {
-      filename: result.filename,
+      filename: result.filename || '',
       segmentCount: result.segment_count,
       totalChars: result.total_input_chars,
       truncated: result.truncated,
@@ -1777,7 +1797,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         isDocumentContext: true,
         documentData: {
           context: documentContext,
-          filename: result.filename,
+          filename: result.filename || '',
           segmentCount: result.segment_count,
           totalChars: result.total_input_chars,
           truncated: result.truncated,
