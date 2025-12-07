@@ -1,6 +1,6 @@
 {
   "name": "braindrive-chat",
-  "version": "1.0.23",
+  "version": "1.0.24",
   "description": "Comprehensive AI chat interface with model selection and conversation history",
   "main": "dist/remoteEntry.js",
   "scripts": {

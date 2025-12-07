@@ -101,7 +101,7 @@ class BrainDriveChatLifecycleManager(BaseLifecycleManager):
         self.plugin_data = {
             "name": "BrainDriveChat",
             "description": "Comprehensive AI chat interface with model selection and conversation history",
-            "version": "1.0.23",
+            "version": "1.0.24",
             "type": "frontend",
             "icon": "MessageSquare",
             "category": "ai",
@@ -134,7 +134,7 @@ class BrainDriveChatLifecycleManager(BaseLifecycleManager):
                 "category": "ai",
                 "priority": 1,
                 "props": {
-                    "initialGreeting": "Hello! I'm your AI assistant. How can I help you today?",
+                    "initialGreeting": "Welcome to your BrainDrive!\\n\\nRemember you always have your {white_label_settings:OWNERS_MANUAL} and {white_label_settings:COMMUNITY} available.\\n\\nhow can I help you today?",
                     "defaultStreamingMode": True,
                     "promptQuestion": "What would you like to know?"
                 },
@@ -142,7 +142,7 @@ class BrainDriveChatLifecycleManager(BaseLifecycleManager):
                     "initial_greeting": {
                         "type": "text",
                         "description": "Initial greeting message from AI",
-                        "default": "Hello! I'm your AI assistant. How can I help you today?"
+                        "default": "Welcome to your BrainDrive!\\n\\nRemember you always have your {white_label_settings:OWNERS_MANUAL} and {white_label_settings:COMMUNITY} available.\\n\\nhow can I help you today?"
                     },
                     "enable_streaming": {
                         "type": "boolean",

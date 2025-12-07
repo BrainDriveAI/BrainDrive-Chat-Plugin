@@ -369,6 +369,7 @@ class ChatHistory extends React.Component<ChatHistoryProps, ChatHistoryState> {
                 target="_blank"
                 rel="noopener noreferrer"
                 className="markdown-link"
+                style={{ color: 'inherit' }}
               />
             ),
             code: ({ node, inline, className, children, ...props }: any) => {

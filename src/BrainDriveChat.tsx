@@ -72,6 +72,16 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   private pendingAutoScrollTimeout: ReturnType<typeof setTimeout> | null = null;
   private lastUserScrollTs = 0;
   private pendingPersonaRequestId: string | null = null;
+  private readonly LEGACY_DEFAULT_GREETING = "Hello! I'm your AI assistant. How can I help you today?";
+  private readonly WHITE_LABEL_DEFAULT_GREETING =
+    "Welcome to your BrainDrive!\n\nRemember you always have your {white_label_settings:OWNERS_MANUAL} and {white_label_settings:COMMUNITY} available.\n\nhow can I help you today?";
+  private readonly WHITE_LABEL_FALLBACK: Record<string, { label: string; url: string }> = {
+    PRIMARY: { label: 'BrainDrive', url: 'https://tinyurl.com/4dx47m7p' },
+    OWNERS_MANUAL: { label: "BrainDrive Owner's Manual", url: 'https://tinyurl.com/vd99cuex' },
+    COMMUNITY: { label: 'BrainDrive Community', url: 'https://tinyurl.com/yc2u5v2a' },
+    SUPPORT: { label: 'BrainDrive Support', url: 'https://tinyurl.com/4h4rtx2m' },
+    DOCUMENTATION: { label: 'BrainDrive Docs', url: 'https://tinyurl.com/ewajc7k3' },
+  };
 
   constructor(props: BrainDriveChatProps) {
     super(props);
@@ -167,9 +177,84 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     this.documentService = new DocumentService(props.services.api);
   }
 
+  /**
+   * Fetch white-label settings payload (parsed) if available.
+   */
+  private async fetchWhiteLabelSettings(): Promise<Record<string, { label?: string; url?: string }>> {
+    const settingsSvc = this.props.services?.settings;
+    if (!settingsSvc) return {};
+
+    try {
+      const getter: any = (settingsSvc as any).getSetting || (settingsSvc as any).get;
+      if (!getter) return {};
+
+      const raw = await getter.call(settingsSvc, 'white_label_settings', { userId: 'current' });
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (error) {
+      console.warn('Unable to load white-label settings', error);
+      return {};
+    }
+  }
+
+  /**
+   * Resolve {white_label_settings:KEY} tokens to links or labels.
+   */
+  private resolveWhiteLabelTokens(template: string, payload: Record<string, { label?: string; url?: string }>): string {
+    if (!template) return template;
+    const map: Record<string, { label?: string; url?: string }> = {
+      ...this.WHITE_LABEL_FALLBACK,
+      ...(payload || {}),
+    };
+
+    return template.replace(/\{white_label_settings:([A-Z0-9_]+)\}/gi, (_match, rawKey) => {
+      const key = (rawKey || '').toUpperCase();
+      const entry = map[key];
+      if (entry && typeof entry === 'object') {
+        const label = entry.label || key;
+        if (entry.url) {
+          return `[${label}](${entry.url})`;
+        }
+        return label;
+      }
+      return key;
+    });
+  }
+
+  /**
+   * Resolve greeting template with white-label tokens substituted.
+   */
+  private async resolveGreetingTemplate(template: string): Promise<string> {
+    const whiteLabel = await this.fetchWhiteLabelSettings();
+    return this.resolveWhiteLabelTokens(template, whiteLabel);
+  }
+
+  /**
+   * Build the greeting content with fallback and token resolution.
+   */
+  private async buildInitialGreeting(personaGreeting?: string | null): Promise<string | null> {
+    const rawInitialGreeting = this.props.initialGreeting;
+    const normalizedInitialGreeting = (rawInitialGreeting || '').trim();
+    const legacyDetected =
+      !normalizedInitialGreeting ||
+      normalizedInitialGreeting === this.LEGACY_DEFAULT_GREETING ||
+      /hello!?\s*i'?m your ai assistant\.?\s*how can i help you today\??/i.test(normalizedInitialGreeting);
+    const shouldUseDefaultTemplate =
+      !personaGreeting &&
+      legacyDetected;
+    const baseGreeting = personaGreeting || (shouldUseDefaultTemplate ? this.WHITE_LABEL_DEFAULT_GREETING : rawInitialGreeting);
+
+    if (!baseGreeting) return null;
+
+    try {
+      return await this.resolveGreetingTemplate(baseGreeting);
+    } catch (error) {
+      console.warn('Failed to resolve greeting template, falling back to base greeting', error);
+      return baseGreeting;
+    }
+  }
+
   componentDidMount() {
-    console.log(`🎭 ComponentDidMount - Initial persona state: selectedPersona=${this.state.selectedPersona?.name || 'null'}, showPersonaSelection=${this.state.showPersonaSelection}, availablePersonas=${this.props.availablePersonas?.length || 0}`);
-    
     this.initializeThemeService();
     this.initializePageContextService();
     this.loadInitialData();
@@ -187,33 +272,32 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
 
     // Set initialization timeout
     setTimeout(() => {
-      if (!this.state.conversation_id) {
-        // Only use persona greeting if persona selection is enabled and a persona is selected
-        // Ensure persona is null when personas are disabled
-        const effectivePersona = this.state.showPersonaSelection ? this.state.selectedPersona : null;
-        const personaGreeting = this.state.showPersonaSelection && effectivePersona?.sample_greeting;
-        const greetingContent = personaGreeting || this.props.initialGreeting;
-        
-        console.log(`🎭 Greeting logic: showPersonaSelection=${this.state.showPersonaSelection}, effectivePersona=${effectivePersona?.name || 'none'}, using=${personaGreeting ? 'persona' : 'default'} greeting`);
-        
-        if (greetingContent && !this.initialGreetingAdded) {
-          this.initialGreetingAdded = true;
+      (async () => {
+        if (!this.state.conversation_id) {
+          // Only use persona greeting if persona selection is enabled and a persona is selected
+          // Ensure persona is null when personas are disabled
+          const effectivePersona = this.state.showPersonaSelection ? this.state.selectedPersona : null;
+          const personaGreeting = this.state.showPersonaSelection && effectivePersona?.sample_greeting;
+          const greetingContent = await this.buildInitialGreeting(personaGreeting || null);
           
-          const greetingMessage: ChatMessage = {
-            id: generateId('greeting'),
-            sender: 'ai',
-            content: greetingContent,
-            timestamp: new Date().toISOString()
-          };
-          
-          this.setState(prevState => ({
-            messages: [...prevState.messages, greetingMessage],
-            isInitializing: false
-          }));
-        } else {
-          this.setState({ isInitializing: false });
+          if (greetingContent && !this.initialGreetingAdded) {
+            this.initialGreetingAdded = true;
+            const greetingMessage: ChatMessage = {
+              id: generateId('greeting'),
+              sender: 'ai',
+              content: greetingContent,
+              timestamp: new Date().toISOString()
+            };
+
+            this.setState(prevState => ({
+              messages: [...prevState.messages, greetingMessage],
+              isInitializing: false
+            }));
+          } else {
+            this.setState({ isInitializing: false });
+          }
         }
-      }
+      })();
     }, UI_CONFIG.INITIAL_GREETING_DELAY);
   }
 
@@ -434,11 +518,8 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
    * Load personas from API or use provided personas
    */
   loadPersonas = async () => {
-    console.log(`🎭 Loading personas - availablePersonas: ${this.props.availablePersonas?.length || 0}, showPersonaSelection: ${this.state.showPersonaSelection}`);
-    
           if (this.props.availablePersonas) {
         // Use provided personas
-        console.log(`🎭 Using provided personas: ${this.props.availablePersonas.map((p: any) => p.name).join(', ')}`);
         this.resolvePendingPersonaSelection();
         return;
       }
@@ -449,7 +530,6 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       if (this.props.services?.api) {
         const response = await this.props.services.api.get('/api/v1/personas');
         const personas = response.personas || [];
-        console.log(`🎭 Loaded personas from API: ${personas.map((p: any) => p.name).join(', ')}`);
         this.setState({
           personas: personas,
           isLoadingPersonas: false
@@ -1121,11 +1201,11 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       pendingModelKey: null,
       pendingModelSnapshot: null,
       pendingPersonaId: null
-    }, () => {
+    }, async () => {
       console.log(`✅ New chat started - conversation_id: ${this.state.conversation_id}`);
       // Only use persona greeting if persona selection is enabled and a persona is selected
       const personaGreeting = this.state.showPersonaSelection && this.state.selectedPersona?.sample_greeting;
-      const greetingContent = personaGreeting || this.props.initialGreeting;
+      const greetingContent = await this.buildInitialGreeting(personaGreeting || null);
       
       console.log(`🎭 New chat greeting: showPersonaSelection=${this.state.showPersonaSelection}, selectedPersona=${this.state.selectedPersona?.name || 'none'}, using=${personaGreeting ? 'persona' : 'default'} greeting`);
       
@@ -1278,18 +1358,23 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
           // Only use persona greeting if persona selection is enabled and a persona is selected
           // Ensure persona is null when personas are disabled
           const effectivePersona = this.state.showPersonaSelection ? this.state.selectedPersona : null;
-          const greetingContent = (this.state.showPersonaSelection && effectivePersona?.sample_greeting) 
-            || this.props.initialGreeting;
+          const personaGreeting = this.state.showPersonaSelection && effectivePersona?.sample_greeting;
+          const greetingContent = personaGreeting
+            ? personaGreeting
+            : null;
           
-          if (greetingContent) {
-            this.initialGreetingAdded = true;
-            this.addMessageToChat({
-              id: generateId('greeting'),
-              sender: 'ai',
-              content: greetingContent,
-              timestamp: new Date().toISOString()
-            });
-          }
+          (async () => {
+            const resolvedGreeting = await this.buildInitialGreeting(greetingContent);
+            if (resolvedGreeting) {
+              this.initialGreetingAdded = true;
+              this.addMessageToChat({
+                id: generateId('greeting'),
+                sender: 'ai',
+                content: resolvedGreeting,
+                timestamp: new Date().toISOString()
+              });
+            }
+          })();
         }
       });
 
