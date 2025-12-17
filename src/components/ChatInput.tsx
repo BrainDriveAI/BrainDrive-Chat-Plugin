@@ -1,6 +1,6 @@
 import React from 'react';
 import { ModelInfo } from '../types';
-import { SendIcon, StopIcon } from '../icons';
+import { PersonaIcon, PlusIcon, SearchIcon, SendIcon, StopIcon, UploadIcon } from '../icons';
 
 interface ChatInputProps {
   inputText: string;
@@ -173,7 +173,51 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
         <div className="chat-input-wrapper">
           <div className="input-with-buttons">
             <div className={`chat-input-row ${this.state.isMultiline ? 'multiline' : ''}`}>
-              {/* Persona Selector - optional left control */}
+              {/* Left feature action */}
+              <div className="menu-container" ref={this.menuRef}>
+                <button
+                  type="button"
+                  className="input-button icon-button feature-button"
+                  onClick={this.toggleMenu}
+                  aria-label="Open feature menu"
+                  aria-expanded={this.state.isMenuOpen}
+                  disabled={isLoading || isLoadingHistory}
+                >
+                  <PlusIcon />
+                </button>
+
+                {this.state.isMenuOpen && (
+                  <div className="dropdown-menu feature-menu">
+                    <button className="menu-item" onClick={this.handleFileUpload} disabled={isLoading || isLoadingHistory}>
+                      <UploadIcon />
+                      <div className="menu-item-text">
+                        <span className="menu-item-title">Attach file</span>
+                        <span className="menu-item-subtext">Upload docs to ground responses</span>
+                      </div>
+                    </button>
+                    <button className="menu-item" onClick={this.handleWebSearchToggle} disabled={isLoading || isLoadingHistory}>
+                      <SearchIcon isActive={useWebSearch} />
+                      <div className="menu-item-text">
+                        <span className="menu-item-title">Web search</span>
+                        <span className="menu-item-subtext">{useWebSearch ? 'Disable' : 'Enable'} live search for answers</span>
+                      </div>
+                    </button>
+                    {showPersonaSelection && (
+                      <button className="menu-item" onClick={this.handlePersonaToggle} disabled={isLoading || isLoadingHistory}>
+                        <PersonaIcon />
+                        <div className="menu-item-text">
+                          <span className="menu-item-title">Personas</span>
+                          <span className="menu-item-subtext">
+                            {this.state.showPersonaSelector ? 'Hide selector' : 'Choose a voice'}
+                          </span>
+                        </div>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Persona Selector - optional inline control */}
               {showPersonaSelection && (
                 <select
                   value={selectedPersona?.id || ''}
@@ -212,6 +256,7 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
                 disabled={(!inputText.trim() && !isStreaming) || isLoadingHistory || !selectedModel}
                 className={`input-button send-button ${isStreaming ? 'stop-button' : ''}`}
                 title={isStreaming ? "Stop generation" : "Send message"}
+                type="button"
               >
                 {isStreaming ? <StopIcon /> : <SendIcon />}
               </button>
