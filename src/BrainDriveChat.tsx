@@ -8,7 +8,9 @@ import {
   PersonaInfo,
   ConversationWithPersona,
   DocumentProcessingResult,
-  DocumentContextResult
+  DocumentContextResult,
+  RagCollection,
+  RagCreateCollectionInput
 } from './types';
 import {
   generateId
@@ -30,11 +32,13 @@ import {
   ChatHeader,
   ChatHistory,
   ChatInput,
-  LoadingStates
+  LoadingStates,
+  CreateRagCollectionModal,
+  ManageRagDocumentsModal
 } from './components';
 
 // Import services
-import { AIService, SearchService, DocumentService } from './services';
+import { AIService, SearchService, DocumentService, RagService } from './services';
 
 // Import icons
 // Icons previously used in the bottom history panel are no longer needed here
@@ -60,6 +64,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   private aiService: AIService | null = null;
   private searchService: SearchService | null = null;
   private documentService: DocumentService | null = null;
+  private ragService: RagService | null = null;
   private currentStreamingAbortController: AbortController | null = null;
   private menuButtonRef: HTMLButtonElement | null = null;
   // Keep the live edge comfortably in view instead of snapping flush bottom
@@ -137,6 +142,15 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       documentContextInjectedConversationId: null,
       documentContextInfo: null,
       isProcessingDocuments: false,
+
+      // RAG (collections) state
+      ragCollections: [],
+      ragCollectionsLoading: false,
+      ragCollectionsError: null,
+      selectedRagCollectionId: null,
+      isCreateRagCollectionModalOpen: false,
+      isManageRagDocumentsModalOpen: false,
+      manageRagDocumentsCollectionId: null,
       
       // Scroll state
       isNearBottom: true,
@@ -175,6 +189,9 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     
     // Initialize Document service with authenticated API service
     this.documentService = new DocumentService(props.services.api);
+
+    // Initialize RAG service (collections + retrieval) using shared services
+    this.ragService = new RagService(props.services);
   }
 
   /**
@@ -365,9 +382,101 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   loadInitialData = async () => {
     await Promise.all([
       this.loadProviderSettings(),
-      this.fetchConversations()
+      this.fetchConversations(),
+      this.loadRagCollections({ silent: true })
     ]);
   }
+
+  loadRagCollections = async (options: { silent?: boolean } = {}): Promise<void> => {
+    if (!this.ragService) return;
+
+    if (!options.silent) {
+      this.setState({ ragCollectionsLoading: true, ragCollectionsError: null });
+    }
+
+    try {
+      const collections = await this.ragService.listCollections();
+      this.setState((prev) => {
+        const selectedStillExists = prev.selectedRagCollectionId
+          ? collections.some((c) => c.id === prev.selectedRagCollectionId)
+          : true;
+
+        return {
+          ragCollections: collections,
+          ragCollectionsLoading: false,
+          ragCollectionsError: null,
+          selectedRagCollectionId: selectedStillExists ? prev.selectedRagCollectionId : null,
+        };
+      });
+    } catch (error) {
+      console.error('Error loading RAG collections:', error);
+      this.setState({
+        ragCollectionsLoading: false,
+        ragCollectionsError: error instanceof Error ? error.message : 'Unable to load collections',
+      });
+    }
+  };
+
+  private getSelectedRagCollection = (): RagCollection | null => {
+    const id = this.state.selectedRagCollectionId;
+    if (!id) return null;
+    return this.state.ragCollections.find((c) => c.id === id) || null;
+  };
+
+  openCreateRagCollectionModal = (): void => {
+    this.setState({ isCreateRagCollectionModalOpen: true });
+  };
+
+  closeCreateRagCollectionModal = (): void => {
+    this.setState({ isCreateRagCollectionModalOpen: false });
+  };
+
+  openManageRagDocumentsModal = (collectionId: string): void => {
+    this.setState({
+      isManageRagDocumentsModalOpen: true,
+      manageRagDocumentsCollectionId: collectionId,
+    });
+  };
+
+  closeManageRagDocumentsModal = (): void => {
+    this.setState({
+      isManageRagDocumentsModalOpen: false,
+      manageRagDocumentsCollectionId: null,
+    });
+  };
+
+  selectRagCollection = (collectionId: string | null): void => {
+    this.setState({ selectedRagCollectionId: collectionId });
+  };
+
+  handleCreateRagCollection = async (payload: RagCreateCollectionInput): Promise<RagCollection> => {
+    if (!this.ragService) {
+      throw new Error('RAG service not available');
+    }
+
+    const normalized: RagCreateCollectionInput = {
+      name: (payload.name || '').trim(),
+      description: payload.description?.trim() || undefined,
+      color: payload.color || '#3B82F6',
+    };
+
+    if (!normalized.name) {
+      throw new Error('Collection name is required');
+    }
+
+    const created = await this.ragService.createCollection(normalized);
+
+    // Optimistic update + auto-select (product decision)
+    this.setState((prev) => ({
+      ragCollections: [created, ...prev.ragCollections.filter((c) => c.id !== created.id)],
+      selectedRagCollectionId: created.id,
+    }));
+
+    // Refresh from source of truth (counts may change)
+    this.loadRagCollections({ silent: true });
+
+    return created;
+  };
 
   /**
    * Get page-specific setting key with fallback to global
@@ -2535,8 +2644,66 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       // Create abort controller for streaming
       this.currentStreamingAbortController = new AbortController();
       
-      // Perform web search if enabled
       let enhancedPrompt = prompt;
+
+      // RAG retrieval (collections) if a collection is selected
+      if (this.state.selectedRagCollectionId && this.ragService) {
+        try {
+          const selectedCollection = this.getSelectedRagCollection();
+
+          const history = this.state.messages
+            .filter(m => !m.isDocumentContext && !m.isSearchResults && !m.isRetrievedContext)
+            .slice(-6) // last ~3 turns (user+assistant pairs)
+            .map(m => ({
+              role: m.sender === 'user' ? 'user' as const : 'assistant' as const,
+              content: m.content,
+            }));
+
+          const retrievalResult = await this.ragService.retrieveContext(
+            prompt,
+            this.state.selectedRagCollectionId,
+            history
+          );
+
+          if (retrievalResult && retrievalResult.chunks && retrievalResult.chunks.length > 0) {
+            const relevantContext = retrievalResult.chunks
+              .map((chunk, idx) => `Excerpt ${idx + 1}:\n${chunk.content}`)
+              .join('\n\n');
+
+            const ragContextBlock = `[RAG CONTEXT - ${selectedCollection?.name || 'Collection'}]\n${relevantContext}\n[END RAG CONTEXT]`;
+            enhancedPrompt = `${ragContextBlock}\n\nUser Question: ${prompt}`;
+
+            const retrievedMessage: ChatMessage = {
+              id: generateId('retrieval'),
+              sender: 'ai',
+              content: '',
+              timestamp: new Date().toISOString(),
+              isRetrievedContext: true,
+              retrievalData: {
+                collectionId: this.state.selectedRagCollectionId,
+                collectionName: selectedCollection?.name,
+                chunks: retrievalResult.chunks as any,
+                context: ragContextBlock,
+                intent: retrievalResult.intent,
+                metadata: retrievalResult.metadata,
+              },
+            };
+
+            this.addMessageToChat(retrievedMessage);
+          }
+        } catch (ragError) {
+          console.error('RAG retrieval error:', ragError);
+          // Non-blocking: continue without RAG context
+          this.addMessageToChat({
+            id: generateId('rag-warning'),
+            sender: 'ai',
+            content: '⚠️ RAG retrieval failed. Continuing without collection context.',
+            timestamp: new Date().toISOString()
+          });
+        }
+      }
+      
+      // Perform web search if enabled
       
       if (this.state.useWebSearch && this.searchService) {
         try {
@@ -2871,12 +3038,38 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
                 onFileUpload={this.handleFileUploadClick}
                 onToggleWebSearch={this.toggleWebSearchMode}
                 useWebSearch={useWebSearch}
+                webSearchDisabled={true}
                 inputRef={this.inputRef}
+                ragCollections={this.state.ragCollections}
+                ragCollectionsLoading={this.state.ragCollectionsLoading}
+                ragCollectionsError={this.state.ragCollectionsError}
+                selectedRagCollectionId={this.state.selectedRagCollectionId}
+                onRagSelectCollection={this.selectRagCollection}
+                onRagCreateCollection={this.openCreateRagCollectionModal}
+                onRagManageDocuments={this.openManageRagDocumentsModal}
+                onRagRefreshCollections={() => this.loadRagCollections({ silent: true })}
                 personas={personas}
                 selectedPersona={selectedPersona}
                 onPersonaChange={this.handlePersonaChange}
                 onPersonaToggle={this.handlePersonaToggle}
                 showPersonaSelection={false} // Moved to header
+              />
+
+              <CreateRagCollectionModal
+                isOpen={this.state.isCreateRagCollectionModalOpen}
+                onClose={this.closeCreateRagCollectionModal}
+                onCreate={this.handleCreateRagCollection}
+              />
+
+              <ManageRagDocumentsModal
+                isOpen={this.state.isManageRagDocumentsModalOpen}
+                onClose={this.closeManageRagDocumentsModal}
+                ragService={this.ragService}
+                collection={
+                  this.state.manageRagDocumentsCollectionId
+                    ? (this.state.ragCollections.find((c) => c.id === this.state.manageRagDocumentsCollectionId) || null)
+                    : null
+                }
               />
             </>
           )}

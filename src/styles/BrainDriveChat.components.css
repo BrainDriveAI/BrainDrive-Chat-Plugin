@@ -772,6 +772,33 @@
   opacity: 0.75;
 }
 
+.menu-divider {
+  height: 1px;
+  background-color: var(--border-color);
+  margin: 0.25rem 0;
+}
+
+.menu-item-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  opacity: 0.85;
+}
+
+.menu-item-check {
+  display: flex;
+  align-items: center;
+  color: var(--button-primary-bg);
+}
+
+.menu-submenu {
+  position: absolute;
+  top: 0;
+  left: calc(100% + 0.5rem);
+  bottom: auto;
+}
+
 @keyframes fadeInUp {
   from {
     opacity: 0;
