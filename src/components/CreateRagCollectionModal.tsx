@@ -47,11 +47,17 @@ class CreateRagCollectionModal extends React.Component<CreateRagCollectionModalP
       return;
     }
 
+    const description = this.state.description.trim();
+    if (!description) {
+      this.setState({ error: 'Collection description is required' });
+      return;
+    }
+
     this.setState({ isSaving: true, error: null });
     try {
       await this.props.onCreate({
         name,
-        description: this.state.description.trim() || undefined,
+        description,
         color: this.state.color || '#3B82F6',
       });
       this.props.onClose();
@@ -98,7 +104,7 @@ class CreateRagCollectionModal extends React.Component<CreateRagCollectionModalP
                 className="modal-input"
                 value={this.state.description}
                 onChange={(e) => this.setState({ description: e.target.value })}
-                placeholder="Description (optional)"
+                placeholder="Description (required)"
                 disabled={this.state.isSaving}
               />
 
@@ -122,7 +128,11 @@ class CreateRagCollectionModal extends React.Component<CreateRagCollectionModalP
                 <button type="button" className="modal-btn modal-btn-secondary" onClick={this.props.onClose} disabled={this.state.isSaving}>
                   Cancel
                 </button>
-                <button type="submit" className="modal-btn modal-btn-primary" disabled={this.state.isSaving || !this.state.name.trim()}>
+                <button
+                  type="submit"
+                  className="modal-btn modal-btn-primary"
+                  disabled={this.state.isSaving || !this.state.name.trim() || !this.state.description.trim()}
+                >
                   {this.state.isSaving ? 'Creating…' : 'Create'}
                 </button>
               </div>
@@ -135,4 +145,3 @@ class CreateRagCollectionModal extends React.Component<CreateRagCollectionModalP
 }
 
 export default CreateRagCollectionModal;
-

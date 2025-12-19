@@ -456,12 +456,16 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
 
     const normalized: RagCreateCollectionInput = {
       name: (payload.name || '').trim(),
-      description: payload.description?.trim() || undefined,
+      description: payload.description?.trim() || '',
       color: payload.color || '#3B82F6',
     };
 
     if (!normalized.name) {
       throw new Error('Collection name is required');
+    }
+
+    if (!normalized.description) {
+      throw new Error('Collection description is required');
     }
 
     const created = await this.ragService.createCollection(normalized);

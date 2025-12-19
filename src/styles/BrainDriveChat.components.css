@@ -1023,3 +1023,29 @@
   opacity: 0.3;
   cursor: not-allowed;
 }
+
+/* Scoped overrides to prevent host/plugin CSS collisions */
+.braindrive-chat-container .input-with-buttons {
+  border-radius: 24px;
+}
+
+.braindrive-chat-container .input-button,
+.braindrive-chat-container .send-button {
+  border-radius: 999px;
+}
+
+.braindrive-chat-container .dropdown-menu {
+  border-radius: 0.75rem;
+}
+
+.braindrive-chat-container .dropdown-menu.feature-menu {
+  overflow: visible;
+}
+
+.braindrive-chat-container .menu-submenu {
+  position: absolute;
+  top: 0;
+  left: calc(100% + 0.5rem);
+  bottom: auto;
+  z-index: 1001;
+}

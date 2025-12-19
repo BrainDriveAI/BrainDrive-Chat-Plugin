@@ -57,6 +57,42 @@ function unwrapSettingValue(raw: any): any {
   return raw;
 }
 
+function extractErrorMessage(body: unknown): string | null {
+  if (!body) return null;
+
+  if (typeof body === 'string') return body;
+
+  if (typeof body !== 'object') return String(body);
+
+  const asAny = body as any;
+  if (typeof asAny.message === 'string' && asAny.message.trim()) return asAny.message;
+  if (typeof asAny.error === 'string' && asAny.error.trim()) return asAny.error;
+  if (typeof asAny.detail === 'string' && asAny.detail.trim()) return asAny.detail;
+
+  const detail = asAny.detail;
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => {
+        if (!item || typeof item !== 'object') return null;
+        const msg = (item as any).msg;
+        return typeof msg === 'string' ? msg : null;
+      })
+      .filter(Boolean) as string[];
+    if (messages.length) return messages.join('; ');
+    try {
+      return JSON.stringify(detail);
+    } catch {
+      return String(detail);
+    }
+  }
+
+  try {
+    return JSON.stringify(body);
+  } catch {
+    return String(body);
+  }
+}
+
 export class RagService {
   private services: Services;
   private baseUrlPromise: Promise<string> | null = null;
@@ -140,7 +176,7 @@ export class RagService {
         let message = `HTTP ${response.status} ${response.statusText}`;
         try {
           const maybeJson = await response.json();
-          const extracted = (maybeJson && (maybeJson.message || maybeJson.detail || maybeJson.error)) || null;
+          const extracted = extractErrorMessage(maybeJson);
           if (extracted) message = extracted;
         } catch {
           try {

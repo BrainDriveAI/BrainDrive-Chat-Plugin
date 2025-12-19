@@ -1,6 +1,6 @@
 import React from 'react';
 import { ModelInfo, RagCollection } from '../types';
-import { CheckIcon, ChevronRightIcon, PersonaIcon, PlusIcon, SearchIcon, SendIcon, StopIcon, UploadIcon } from '../icons';
+import { CheckIcon, ChevronRightIcon, DatabaseIcon, PersonaIcon, PlusIcon, SearchIcon, SendIcon, StopIcon, UploadIcon } from '../icons';
 
 interface ChatInputProps {
   inputText: string;
@@ -236,6 +236,15 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
     } = this.props;
 
     // Local dropdown state retained for future menu use; not used in current layout
+
+    const selectedRagCollection = selectedRagCollectionId
+      ? ragCollections.find((collection) => collection.id === selectedRagCollectionId) || null
+      : null;
+    const ragMenuSubtext = selectedRagCollection
+      ? `Selected: ${selectedRagCollection.name}`
+      : selectedRagCollectionId
+        ? 'Selected collection'
+        : 'Select a collection to enable RAG';
     
     return (
       <div className="chat-input-container">
@@ -258,7 +267,11 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
                 {this.state.isMenuOpen && (
                   <div className="dropdown-menu feature-menu">
                     <button className="menu-item menu-item-has-submenu" onClick={this.openRagMenu} disabled={isLoading || isLoadingHistory}>
-                      <span className="menu-item-title">RAG</span>
+                      <DatabaseIcon />
+                      <div className="menu-item-text">
+                        <span className="menu-item-title">RAG</span>
+                        <span className="menu-item-subtext">{ragMenuSubtext}</span>
+                      </div>
                       <span className="menu-item-right">
                         <ChevronRightIcon />
                       </span>
@@ -315,15 +328,19 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
 
                         {!ragCollectionsLoading && ragCollectionsError && (
                           <button className="menu-item" disabled title={ragCollectionsError}>
-                            <span className="menu-item-title">Unable to load collections</span>
-                            <span className="menu-item-subtext">{ragCollectionsError}</span>
+                            <div className="menu-item-text">
+                              <span className="menu-item-title">Unable to load collections</span>
+                              <span className="menu-item-subtext">{ragCollectionsError}</span>
+                            </div>
                           </button>
                         )}
 
                         {!ragCollectionsLoading && !ragCollectionsError && ragCollections.length === 0 && (
                           <button className="menu-item" disabled>
-                            <span className="menu-item-title">No collections yet</span>
-                            <span className="menu-item-subtext">Create one to enable RAG</span>
+                            <div className="menu-item-text">
+                              <span className="menu-item-title">No collections yet</span>
+                              <span className="menu-item-subtext">Create one to enable RAG</span>
+                            </div>
                           </button>
                         )}
 
