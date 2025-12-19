@@ -281,6 +281,11 @@
   opacity: 0.7;
 }
 
+.header-icon-only svg {
+  width: 21px;
+  height: 21px;
+}
+
 .header-icon-only:hover:not(:disabled) {
   opacity: 1;
   background-color: var(--border-color);
@@ -1073,6 +1078,6 @@
 }
 
 .braindrive-chat-container .input-button.icon-button.feature-button svg {
-  width: 18px;
-  height: 18px;
+  width: 21px;
+  height: 21px;
 }

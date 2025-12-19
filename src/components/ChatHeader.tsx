@@ -1,7 +1,7 @@
 import React from 'react';
 import { ModelInfo, ConversationInfo, PersonaInfo } from '../types';
 import { formatRelativeTime } from '../utils';
-import { ComposeIcon, ThreeDotsIcon, EditIcon, DeleteIcon, UploadIcon } from '../icons';
+import { ComposeIcon, SettingsIcon, EditIcon, DeleteIcon, UploadIcon } from '../icons';
 import SearchableDropdown, {
   DropdownOption
 } from './SearchableDropdown';
@@ -255,7 +255,7 @@ class ChatHeader extends React.Component<ChatHeaderProps, ChatHeaderState> {
                   aria-haspopup="menu"
                   aria-expanded={this.state.isMenuOpen}
                 >
-                  <ThreeDotsIcon />
+                  <SettingsIcon />
                 </button>
                 {this.state.isMenuOpen && selectedConversation && (
                   <div
