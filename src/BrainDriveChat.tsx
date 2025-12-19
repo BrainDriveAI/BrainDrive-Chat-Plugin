@@ -2649,6 +2649,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       this.currentStreamingAbortController = new AbortController();
       
       let enhancedPrompt = prompt;
+      let retrievalDataForResponse: ChatMessage['retrievalData'] | null = null;
 
       // RAG retrieval (collections) if a collection is selected
       if (this.state.selectedRagCollectionId && this.ragService) {
@@ -2677,23 +2678,14 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
             const ragContextBlock = `[RAG CONTEXT - ${selectedCollection?.name || 'Collection'}]\n${relevantContext}\n[END RAG CONTEXT]`;
             enhancedPrompt = `${ragContextBlock}\n\nUser Question: ${prompt}`;
 
-            const retrievedMessage: ChatMessage = {
-              id: generateId('retrieval'),
-              sender: 'ai',
-              content: '',
-              timestamp: new Date().toISOString(),
-              isRetrievedContext: true,
-              retrievalData: {
-                collectionId: this.state.selectedRagCollectionId,
-                collectionName: selectedCollection?.name,
-                chunks: retrievalResult.chunks as any,
-                context: ragContextBlock,
-                intent: retrievalResult.intent,
-                metadata: retrievalResult.metadata,
-              },
+            retrievalDataForResponse = {
+              collectionId: this.state.selectedRagCollectionId,
+              collectionName: selectedCollection?.name,
+              chunks: retrievalResult.chunks as any,
+              context: ragContextBlock,
+              intent: retrievalResult.intent,
+              metadata: retrievalResult.metadata,
             };
-
-            this.addMessageToChat(retrievedMessage);
           }
         } catch (ragError) {
           console.error('RAG retrieval error:', ragError);
@@ -2797,7 +2789,8 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         sender: 'ai',
         content: '',
         timestamp: new Date().toISOString(),
-        isStreaming: true
+        isStreaming: true,
+        ...(retrievalDataForResponse ? { retrievalData: retrievalDataForResponse } : {}),
       });
       
       // Track the current response content for proper abort handling

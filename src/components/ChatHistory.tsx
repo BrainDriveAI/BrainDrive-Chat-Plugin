@@ -63,6 +63,56 @@ class ChatHistory extends React.Component<ChatHistoryProps, ChatHistoryState> {
     };
   }
 
+  private renderRetrievedContextBlock = (messageId: string, retrievalData: NonNullable<ChatMessage['retrievalData']>) => {
+    const isExpanded = this.state.expandedRetrievedContext.has(messageId);
+    const chunkCount = retrievalData.chunks?.length || 0;
+    const collectionLabel = retrievalData.collectionName || 'Selected collection';
+
+    return (
+      <div className={`retrieved-context-block ${isExpanded ? 'expanded' : 'collapsed'}`}>
+        <button
+          type="button"
+          className="retrieved-context-header-btn"
+          onClick={() => this.toggleRetrievedContext(messageId)}
+          aria-expanded={isExpanded}
+        >
+          <span className="retrieved-context-title-row">
+            <span className="retrieved-icon">📚</span>
+            <span className="retrieved-collection">{collectionLabel}</span>
+            <span className="retrieved-info">
+              {chunkCount} chunk{chunkCount === 1 ? '' : 's'}
+              {retrievalData.intent?.type ? ` • ${retrievalData.intent.type}` : ''}
+            </span>
+          </span>
+          <span className="retrieved-context-toggle" aria-hidden="true">
+            {isExpanded ? '▼' : '▶'}
+          </span>
+        </button>
+
+        <div className="retrieved-context-panel" aria-hidden={!isExpanded}>
+          {isExpanded && (
+            <div className="retrieved-context-panel-inner">
+              <div className="retrieved-chunks">
+                {retrievalData.chunks.map((chunk: any, index: number) => {
+                  const filename = chunk?.metadata?.document_filename || chunk?.metadata?.original_filename || '';
+                  return (
+                    <div key={chunk.id || index} className="retrieved-chunk-item">
+                      <div className="retrieved-chunk-header">
+                        <span className="retrieved-chunk-number">#{index + 1}</span>
+                        {filename && <span className="retrieved-chunk-filename">{filename}</span>}
+                      </div>
+                      <div className="retrieved-chunk-content">{chunk.content}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   emitScrollIntent = (source: ScrollIntentSource) => {
     if (this.props.onUserScrollIntent) {
       this.props.onUserScrollIntent(source);
@@ -224,55 +274,11 @@ class ChatHistory extends React.Component<ChatHistoryProps, ChatHistoryState> {
     const { retrievalData } = message;
     if (!retrievalData) return null;
 
-    const isExpanded = this.state.expandedRetrievedContext.has(message.id);
-    const chunkCount = retrievalData.chunks?.length || 0;
-    const collectionLabel = retrievalData.collectionName || 'Selected collection';
-
     return (
       <div key={message.id} className="message message-ai message-retrieved-context">
         <div className="message-bubble">
           <div className="message-body">
-            <div className="retrieved-context-header">
-              <div className="retrieved-context-summary">
-                <span className="retrieved-icon">📚</span>
-                <span className="retrieved-collection">{collectionLabel}</span>
-                <span className="retrieved-info">
-                  {chunkCount} chunk{chunkCount === 1 ? '' : 's'}
-                  {retrievalData.intent?.type ? ` • ${retrievalData.intent.type}` : ''}
-                </span>
-              </div>
-              <button
-                onClick={() => this.toggleRetrievedContext(message.id)}
-                className="retrieved-toggle-btn"
-                title={isExpanded ? 'Hide retrieved context' : 'Show retrieved context'}
-              >
-                <span className="retrieved-toggle-text">
-                  {isExpanded ? 'Hide' : 'Show'}
-                </span>
-                <span className={`retrieved-toggle-icon ${isExpanded ? 'expanded' : ''}`}>
-                  {isExpanded ? '▼' : '▶'}
-                </span>
-              </button>
-            </div>
-
-            {isExpanded && (
-              <div className="retrieved-context-content">
-                <div className="retrieved-chunks">
-                  {retrievalData.chunks.map((chunk: any, index: number) => {
-                    const filename = chunk?.metadata?.document_filename || chunk?.metadata?.original_filename || '';
-                    return (
-                      <div key={chunk.id || index} className="retrieved-chunk-item">
-                        <div className="retrieved-chunk-header">
-                          <span className="retrieved-chunk-number">#{index + 1}</span>
-                          {filename && <span className="retrieved-chunk-filename">{filename}</span>}
-                        </div>
-                        <div className="retrieved-chunk-content">{chunk.content}</div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+            {this.renderRetrievedContextBlock(message.id, retrievalData)}
           </div>
           <div className="message-meta">
             <span className="message-timestamp">{formatTimestamp(message.timestamp)}</span>
@@ -404,6 +410,8 @@ class ChatHistory extends React.Component<ChatHistoryProps, ChatHistoryState> {
       isEditing ? 'message-is-editing' : '',
       showRawMarkdown ? 'message-raw' : ''
     ].filter(Boolean).join(' ');
+
+    const showRetrievedContextInline = sender === 'ai' && !!message.retrievalData && !message.isRetrievedContext;
 
     let mainContent: React.ReactNode;
     if (isEditing) {
@@ -549,6 +557,10 @@ class ChatHistory extends React.Component<ChatHistoryProps, ChatHistoryState> {
       <div key={message.id} className={messageClassNames} data-message-id={message.id}>
         <div className="message-bubble">
           <div className="message-body">
+            {showRetrievedContextInline && message.retrievalData && (
+              this.renderRetrievedContextBlock(message.id, message.retrievalData)
+            )}
+
             {sender === 'ai' && thinkingContent && (
               <ThinkingBlock isStreaming={isStreaming}>
                 {thinkingContent}
