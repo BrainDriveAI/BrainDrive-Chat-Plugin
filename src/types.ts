@@ -369,6 +369,7 @@ export interface BrainDriveChatState {
   isProcessingDocuments: boolean;
 
   // RAG (collections) state
+  ragEnabled: boolean;
   ragCollections: RagCollection[];
   ragCollectionsLoading: boolean;
   ragCollectionsError: string | null;

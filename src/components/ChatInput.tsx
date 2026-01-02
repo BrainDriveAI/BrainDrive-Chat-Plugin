@@ -21,6 +21,7 @@ interface ChatInputProps {
   inputRef: React.RefObject<HTMLTextAreaElement>;
 
   // RAG (collections) props
+  ragEnabled?: boolean;
   ragCollections: RagCollection[];
   ragCollectionsLoading: boolean;
   ragCollectionsError: string | null;
@@ -176,6 +177,7 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
   };
 
   openRagMenu = () => {
+    if (this.props.ragEnabled === false) return;
     this.setState({ isRagMenuOpen: true, openRagCollectionId: null });
     if (this.props.onRagRefreshCollections) {
       this.props.onRagRefreshCollections();
@@ -183,6 +185,7 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
   };
 
   openRagCollectionMenu = (collectionId: string) => {
+    if (this.props.ragEnabled === false) return;
     this.setState({ isRagMenuOpen: true, openRagCollectionId: collectionId });
   };
 
@@ -225,6 +228,7 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
       useWebSearch,
       webSearchDisabled,
       inputRef,
+      ragEnabled,
       ragCollections,
       ragCollectionsLoading,
       ragCollectionsError,
@@ -236,15 +240,18 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
     } = this.props;
 
     // Local dropdown state retained for future menu use; not used in current layout
+    const isRagEnabled = ragEnabled !== false;
 
     const selectedRagCollection = selectedRagCollectionId
       ? ragCollections.find((collection) => collection.id === selectedRagCollectionId) || null
       : null;
-    const ragMenuSubtext = selectedRagCollection
-      ? `Selected: ${selectedRagCollection.name}`
-      : selectedRagCollectionId
-        ? 'Selected collection'
-        : 'Select a collection to enable RAG';
+    const ragMenuSubtext = !isRagEnabled
+      ? 'RAG unavailable'
+      : selectedRagCollection
+        ? `Selected: ${selectedRagCollection.name}`
+        : selectedRagCollectionId
+          ? 'Selected collection'
+          : 'Select a collection to enable RAG';
     
     return (
       <div className="chat-input-container">
@@ -266,7 +273,11 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
 
                 {this.state.isMenuOpen && (
                   <div className="dropdown-menu feature-menu">
-                    <button className="menu-item menu-item-has-submenu" onClick={this.openRagMenu} disabled={isLoading || isLoadingHistory}>
+                    <button
+                      className="menu-item menu-item-has-submenu"
+                      onClick={this.openRagMenu}
+                      disabled={isLoading || isLoadingHistory || !isRagEnabled}
+                    >
                       <DatabaseIcon />
                       <div className="menu-item-text">
                         <span className="menu-item-title">RAG</span>
@@ -305,7 +316,7 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
                     )}
 
                     {/* RAG submenu */}
-                    {this.state.isRagMenuOpen && (
+                    {isRagEnabled && this.state.isRagMenuOpen && (
                       <div className="dropdown-menu feature-menu menu-submenu" role="menu">
                         <button className="menu-item" onClick={this.handleRagClearSelection} disabled={isLoading || isLoadingHistory}>
                           <span className="menu-item-title">No collection</span>
