@@ -8,7 +8,9 @@ import {
   PersonaInfo,
   ConversationWithPersona,
   DocumentProcessingResult,
-  DocumentContextResult
+  DocumentContextResult,
+  RagCollection,
+  RagCreateCollectionInput
 } from './types';
 import {
   generateId
@@ -30,11 +32,13 @@ import {
   ChatHeader,
   ChatHistory,
   ChatInput,
-  LoadingStates
+  LoadingStates,
+  CreateRagCollectionModal,
+  ManageRagDocumentsModal
 } from './components';
 
 // Import services
-import { AIService, SearchService, DocumentService } from './services';
+import { AIService, SearchService, DocumentService, RagService } from './services';
 
 // Import icons
 // Icons previously used in the bottom history panel are no longer needed here
@@ -60,6 +64,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   private aiService: AIService | null = null;
   private searchService: SearchService | null = null;
   private documentService: DocumentService | null = null;
+  private ragService: RagService | null = null;
   private currentStreamingAbortController: AbortController | null = null;
   private menuButtonRef: HTMLButtonElement | null = null;
   // Keep the live edge comfortably in view instead of snapping flush bottom
@@ -72,7 +77,6 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   private pendingAutoScrollTimeout: ReturnType<typeof setTimeout> | null = null;
   private lastUserScrollTs = 0;
   private pendingPersonaRequestId: string | null = null;
-  private readonly LEGACY_DEFAULT_GREETING = "Hello! I'm your AI assistant. How can I help you today?";
   private readonly WHITE_LABEL_DEFAULT_GREETING =
     "Welcome to your BrainDrive!\n\nRemember you always have your {white_label_settings:OWNERS_MANUAL} and {white_label_settings:COMMUNITY} available.\n\nhow can I help you today?";
   private readonly WHITE_LABEL_FALLBACK: Record<string, { label: string; url: string }> = {
@@ -137,6 +141,16 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       documentContextInjectedConversationId: null,
       documentContextInfo: null,
       isProcessingDocuments: false,
+
+      // RAG (collections) state
+      ragEnabled: true,
+      ragCollections: [],
+      ragCollectionsLoading: false,
+      ragCollectionsError: null,
+      selectedRagCollectionId: null,
+      isCreateRagCollectionModalOpen: false,
+      isManageRagDocumentsModalOpen: false,
+      manageRagDocumentsCollectionId: null,
       
       // Scroll state
       isNearBottom: true,
@@ -175,6 +189,9 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     
     // Initialize Document service with authenticated API service
     this.documentService = new DocumentService(props.services.api);
+
+    // Initialize RAG service (collections + retrieval) using shared services
+    this.ragService = new RagService(props.services);
   }
 
   /**
@@ -231,18 +248,10 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
 
   /**
    * Build the greeting content with fallback and token resolution.
+   * When no persona greeting is provided, always use the white-label default template.
    */
   private async buildInitialGreeting(personaGreeting?: string | null): Promise<string | null> {
-    const rawInitialGreeting = this.props.initialGreeting;
-    const normalizedInitialGreeting = (rawInitialGreeting || '').trim();
-    const legacyDetected =
-      !normalizedInitialGreeting ||
-      normalizedInitialGreeting === this.LEGACY_DEFAULT_GREETING ||
-      /hello!?\s*i'?m your ai assistant\.?\s*how can i help you today\??/i.test(normalizedInitialGreeting);
-    const shouldUseDefaultTemplate =
-      !personaGreeting &&
-      legacyDetected;
-    const baseGreeting = personaGreeting || (shouldUseDefaultTemplate ? this.WHITE_LABEL_DEFAULT_GREETING : rawInitialGreeting);
+    const baseGreeting = personaGreeting || this.WHITE_LABEL_DEFAULT_GREETING;
 
     if (!baseGreeting) return null;
 
@@ -365,9 +374,131 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   loadInitialData = async () => {
     await Promise.all([
       this.loadProviderSettings(),
-      this.fetchConversations()
+      this.fetchConversations(),
+      this.loadRagCollections({ silent: true })
     ]);
   }
+
+  private isAbortError = (error: unknown): boolean => {
+    if (!error) return false;
+    if (typeof DOMException !== 'undefined' && error instanceof DOMException && error.name === 'AbortError') {
+      return true;
+    }
+    if (error instanceof Error && error.name === 'AbortError') return true;
+    const message = error instanceof Error ? error.message : String(error);
+    return /abort/i.test(message);
+  };
+
+  loadRagCollections = async (options: { silent?: boolean } = {}): Promise<void> => {
+    if (!this.ragService) return;
+
+    if (!options.silent) {
+      this.setState({ ragCollectionsLoading: true, ragCollectionsError: null });
+    }
+
+    try {
+      const collections = await this.ragService.listCollections();
+      this.setState((prev) => {
+        const selectedStillExists = prev.selectedRagCollectionId
+          ? collections.some((c) => c.id === prev.selectedRagCollectionId)
+          : true;
+
+        return {
+          ragEnabled: true,
+          ragCollections: collections,
+          ragCollectionsLoading: false,
+          ragCollectionsError: null,
+          selectedRagCollectionId: selectedStillExists ? prev.selectedRagCollectionId : null,
+        };
+      });
+    } catch (error) {
+      if (this.isAbortError(error)) {
+        console.warn('RAG collections request aborted; disabling RAG', error);
+        this.setState({
+          ragEnabled: false,
+          ragCollections: [],
+          ragCollectionsLoading: false,
+          ragCollectionsError: 'RAG service unavailable',
+          selectedRagCollectionId: null,
+          isCreateRagCollectionModalOpen: false,
+          isManageRagDocumentsModalOpen: false,
+          manageRagDocumentsCollectionId: null,
+        });
+        return;
+      }
+
+      console.error('Error loading RAG collections:', error);
+      this.setState({
+        ragCollectionsLoading: false,
+        ragCollectionsError: error instanceof Error ? error.message : 'Unable to load collections',
+      });
+    }
+  };
+
+  private getSelectedRagCollection = (): RagCollection | null => {
+    const id = this.state.selectedRagCollectionId;
+    if (!id) return null;
+    return this.state.ragCollections.find((c) => c.id === id) || null;
+  };
+
+  openCreateRagCollectionModal = (): void => {
+    this.setState({ isCreateRagCollectionModalOpen: true });
+  };
+
+  closeCreateRagCollectionModal = (): void => {
+    this.setState({ isCreateRagCollectionModalOpen: false });
+  };
+
+  openManageRagDocumentsModal = (collectionId: string): void => {
+    this.setState({
+      isManageRagDocumentsModalOpen: true,
+      manageRagDocumentsCollectionId: collectionId,
+    });
+  };
+
+  closeManageRagDocumentsModal = (): void => {
+    this.setState({
+      isManageRagDocumentsModalOpen: false,
+      manageRagDocumentsCollectionId: null,
+    });
+  };
+
+  selectRagCollection = (collectionId: string | null): void => {
+    this.setState({ selectedRagCollectionId: collectionId });
+  };
+
+  handleCreateRagCollection = async (payload: RagCreateCollectionInput): Promise<RagCollection> => {
+    if (!this.ragService) {
+      throw new Error('RAG service not available');
+    }
+
+    const normalized: RagCreateCollectionInput = {
+      name: (payload.name || '').trim(),
+      description: payload.description?.trim() || '',
+      color: payload.color || '#3B82F6',
+    };
+
+    if (!normalized.name) {
+      throw new Error('Collection name is required');
+    }
+
+    if (!normalized.description) {
+      throw new Error('Collection description is required');
+    }
+
+    const created = await this.ragService.createCollection(normalized);
+
+    // Optimistic update + auto-select (product decision)
+    this.setState((prev) => ({
+      ragCollections: [created, ...prev.ragCollections.filter((c) => c.id !== created.id)],
+      selectedRagCollectionId: created.id,
+    }));
+
+    // Refresh from source of truth (counts may change)
+    this.loadRagCollections({ silent: true });
+
+    return created;
+  };
 
   /**
    * Get page-specific setting key with fallback to global
@@ -572,7 +703,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         || (resp && (resp as any).data && (resp as any).data.models)
         || (Array.isArray(resp) ? resp : []);
 
-      const models: ModelInfo[] = Array.isArray(raw)
+      const allModels: ModelInfo[] = Array.isArray(raw)
         ? raw.map((m: any) => {
             const provider = m.provider || 'ollama';
             const providerId = PROVIDER_SETTINGS_ID_MAP[provider] || provider;
@@ -589,28 +720,69 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
           })
         : [];
 
+      const models = this.filterChatCapableModels(allModels);
+
       if (models.length > 0) {
+        const previousSelectedKey = this.getModelKeyFromInfo(this.state.selectedModel);
         const shouldBroadcastDefault = !this.state.pendingModelKey && !this.state.selectedModel;
 
         this.setState(prevState => {
-          if (!prevState.pendingModelKey && !prevState.selectedModel && models.length > 0) {
+          const pendingModelNameFromKey = prevState.pendingModelKey?.includes(':::')
+            ? prevState.pendingModelKey.split(':::').slice(1).join(':::')
+            : prevState.pendingModelKey;
+          const pendingModelName = prevState.pendingModelSnapshot?.name || pendingModelNameFromKey || '';
+          const pendingIsEmbedding = Boolean(prevState.pendingModelKey && this.isEmbeddingModelName(pendingModelName));
+          const hasPendingModel = Boolean(prevState.pendingModelKey && !pendingIsEmbedding);
+
+          const nextSelectedModel = (() => {
+            const candidate = prevState.selectedModel;
+            if (hasPendingModel) {
+              return candidate;
+            }
+            if (!candidate) {
+              return models[0] || null;
+            }
+            if (this.isEmbeddingModelName(candidate.name)) {
+              return models[0] || null;
+            }
+
+            const candidateKey = this.getModelKeyFromInfo(candidate);
+            const candidateInList = models.some(model => this.getModelKeyFromInfo(model) === candidateKey);
+            if (!candidateInList && !candidate.isTemporary) {
+              return models[0] || null;
+            }
+            return candidate;
+          })();
+
+          if (hasPendingModel) {
             return {
               models,
               isLoadingModels: false,
-              selectedModel: models[0],
+              selectedModel: nextSelectedModel,
+              pendingModelKey: prevState.pendingModelKey,
+              pendingModelSnapshot: prevState.pendingModelSnapshot,
             };
           }
 
           return {
             models,
             isLoadingModels: false,
-            selectedModel: prevState.selectedModel,
+            selectedModel: nextSelectedModel,
+            pendingModelKey: null,
+            pendingModelSnapshot: null,
           };
         }, () => {
           if (this.state.pendingModelKey) {
             this.resolvePendingModelSelection();
-          } else if (shouldBroadcastDefault && this.state.selectedModel) {
-            this.broadcastModelSelection(this.state.selectedModel);
+          } else {
+            const currentSelected = this.state.selectedModel;
+            const currentSelectedKey = this.getModelKeyFromInfo(currentSelected);
+            const selectionChanged = Boolean(
+              currentSelectedKey && currentSelectedKey !== previousSelectedKey
+            );
+            if (currentSelected && !currentSelected.isTemporary && (shouldBroadcastDefault || selectionChanged)) {
+              this.broadcastModelSelection(currentSelected);
+            }
           }
         });
 
@@ -666,28 +838,71 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
           }
         }
 
-        if (fallbackModels.length > 0) {
+        const filteredFallbackModels = this.filterChatCapableModels(fallbackModels);
+
+        if (filteredFallbackModels.length > 0) {
+          const previousSelectedKey = this.getModelKeyFromInfo(this.state.selectedModel);
           const shouldBroadcastDefault = !this.state.pendingModelKey && !this.state.selectedModel;
 
           this.setState(prevState => {
-            if (!prevState.pendingModelKey && !prevState.selectedModel && fallbackModels.length > 0) {
+            const pendingModelNameFromKey = prevState.pendingModelKey?.includes(':::')
+              ? prevState.pendingModelKey.split(':::').slice(1).join(':::')
+              : prevState.pendingModelKey;
+            const pendingModelName = prevState.pendingModelSnapshot?.name || pendingModelNameFromKey || '';
+            const pendingIsEmbedding = Boolean(prevState.pendingModelKey && this.isEmbeddingModelName(pendingModelName));
+            const hasPendingModel = Boolean(prevState.pendingModelKey && !pendingIsEmbedding);
+
+            const nextSelectedModel = (() => {
+              const candidate = prevState.selectedModel;
+              if (hasPendingModel) {
+                return candidate;
+              }
+              if (!candidate) {
+                return filteredFallbackModels[0] || null;
+              }
+              if (this.isEmbeddingModelName(candidate.name)) {
+                return filteredFallbackModels[0] || null;
+              }
+
+              const candidateKey = this.getModelKeyFromInfo(candidate);
+              const candidateInList = filteredFallbackModels.some(
+                model => this.getModelKeyFromInfo(model) === candidateKey
+              );
+              if (!candidateInList && !candidate.isTemporary) {
+                return filteredFallbackModels[0] || null;
+              }
+              return candidate;
+            })();
+
+            if (hasPendingModel) {
               return {
-                models: fallbackModels,
+                models: filteredFallbackModels,
                 isLoadingModels: false,
-                selectedModel: fallbackModels[0],
+                selectedModel: nextSelectedModel,
+                pendingModelKey: prevState.pendingModelKey,
+                pendingModelSnapshot: prevState.pendingModelSnapshot,
               };
             }
 
             return {
-              models: fallbackModels,
+              models: filteredFallbackModels,
               isLoadingModels: false,
-              selectedModel: prevState.selectedModel,
+              selectedModel: nextSelectedModel,
+              pendingModelKey: null,
+              pendingModelSnapshot: null,
             };
           }, () => {
             if (this.state.pendingModelKey) {
               this.resolvePendingModelSelection();
-            } else if (shouldBroadcastDefault && this.state.selectedModel) {
-              this.broadcastModelSelection(this.state.selectedModel);
+            } else {
+              const currentSelected = this.state.selectedModel;
+              const currentSelectedKey = this.getModelKeyFromInfo(currentSelected);
+              const selectionChanged = Boolean(
+                currentSelectedKey && currentSelectedKey !== previousSelectedKey
+              );
+              if (currentSelected && !currentSelected.isTemporary && (shouldBroadcastDefault || selectionChanged)) {
+                this.broadcastModelSelection(currentSelected);
+              }
             }
           });
 
@@ -695,7 +910,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         }
 
         this.setState({
-          models: fallbackModels,
+          models: filteredFallbackModels,
           isLoadingModels: false,
         }, () => {
           if (this.state.pendingModelKey) {
@@ -977,6 +1192,35 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     return `${safeServer}:::${safeModel}`;
   }
 
+  private isEmbeddingModelName(modelName?: string | null) {
+    const normalized = (modelName || '').trim().toLowerCase();
+    if (!normalized) {
+      return false;
+    }
+
+    const embeddingMarkers = [
+      'text-embedding',
+      'embedding',
+      'embed',
+      'nomic-embed',
+      'bge-',
+      'e5-',
+      'gte-',
+      'instructor',
+      'sentence-transformers',
+      'rerank',
+      'reranker',
+      'cross-encoder',
+      'colbert'
+    ];
+
+    return embeddingMarkers.some(marker => normalized.includes(marker));
+  }
+
+  private filterChatCapableModels(models: ModelInfo[]) {
+    return models.filter(model => !this.isEmbeddingModelName(model.name));
+  }
+
   private getModelKeyFromInfo(model: ModelInfo | null) {
     if (!model) {
       return '';
@@ -991,6 +1235,31 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       if (pendingModelSnapshot) {
         this.setState({ pendingModelSnapshot: null });
       }
+      return;
+    }
+
+    const pendingModelNameFromKey = pendingModelKey.includes(':::')
+      ? pendingModelKey.split(':::').slice(1).join(':::')
+      : pendingModelKey;
+    const pendingModelName = pendingModelSnapshot?.name || pendingModelNameFromKey;
+
+    if (this.isEmbeddingModelName(pendingModelName)) {
+      this.setState(prevState => {
+        const nextState: Partial<BrainDriveChatState> = {
+          pendingModelKey: null,
+          pendingModelSnapshot: null
+        };
+
+        if (prevState.selectedModel && this.isEmbeddingModelName(prevState.selectedModel.name)) {
+          nextState.selectedModel = prevState.models[0] || null;
+        }
+
+        return nextState as Pick<BrainDriveChatState, keyof BrainDriveChatState>;
+      }, () => {
+        if (this.state.selectedModel) {
+          this.broadcastModelSelection(this.state.selectedModel);
+        }
+      });
       return;
     }
 
@@ -1526,7 +1795,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
 
       const modelName = conversationWithPersona?.model?.trim();
       const serverName = conversationWithPersona?.server?.trim();
-      const hasModelMetadata = Boolean(modelName && serverName);
+      const hasModelMetadata = Boolean(modelName && serverName && !this.isEmbeddingModelName(modelName));
 
       const pendingModelKey = hasModelMetadata
         ? this.getModelKey(modelName, serverName)
@@ -2535,8 +2804,58 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       // Create abort controller for streaming
       this.currentStreamingAbortController = new AbortController();
       
-      // Perform web search if enabled
       let enhancedPrompt = prompt;
+      let retrievalDataForResponse: ChatMessage['retrievalData'] | null = null;
+
+      // RAG retrieval (collections) if a collection is selected
+      if (this.state.ragEnabled && this.state.selectedRagCollectionId && this.ragService) {
+        try {
+          const selectedCollection = this.getSelectedRagCollection();
+
+          const history = this.state.messages
+            .filter(m => !m.isDocumentContext && !m.isSearchResults && !m.isRetrievedContext)
+            .slice(-6) // last ~3 turns (user+assistant pairs)
+            .map(m => ({
+              role: m.sender === 'user' ? 'user' as const : 'assistant' as const,
+              content: m.content,
+            }));
+
+          const retrievalResult = await this.ragService.retrieveContext(
+            prompt,
+            this.state.selectedRagCollectionId,
+            history
+          );
+
+          if (retrievalResult && retrievalResult.chunks && retrievalResult.chunks.length > 0) {
+            const relevantContext = retrievalResult.chunks
+              .map((chunk, idx) => `Excerpt ${idx + 1}:\n${chunk.content}`)
+              .join('\n\n');
+
+            const ragContextBlock = `[RAG CONTEXT - ${selectedCollection?.name || 'Collection'}]\n${relevantContext}\n[END RAG CONTEXT]`;
+            enhancedPrompt = `${ragContextBlock}\n\nUser Question: ${prompt}`;
+
+            retrievalDataForResponse = {
+              collectionId: this.state.selectedRagCollectionId,
+              collectionName: selectedCollection?.name,
+              chunks: retrievalResult.chunks as any,
+              context: ragContextBlock,
+              intent: retrievalResult.intent,
+              metadata: retrievalResult.metadata,
+            };
+          }
+        } catch (ragError) {
+          console.error('RAG retrieval error:', ragError);
+          // Non-blocking: continue without RAG context
+          this.addMessageToChat({
+            id: generateId('rag-warning'),
+            sender: 'ai',
+            content: '⚠️ RAG retrieval failed. Continuing without collection context.',
+            timestamp: new Date().toISOString()
+          });
+        }
+      }
+      
+      // Perform web search if enabled
       
       if (this.state.useWebSearch && this.searchService) {
         try {
@@ -2626,7 +2945,8 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         sender: 'ai',
         content: '',
         timestamp: new Date().toISOString(),
-        isStreaming: true
+        isStreaming: true,
+        ...(retrievalDataForResponse ? { retrievalData: retrievalDataForResponse } : {}),
       });
       
       // Track the current response content for proper abort handling
@@ -2871,13 +3191,44 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
                 onFileUpload={this.handleFileUploadClick}
                 onToggleWebSearch={this.toggleWebSearchMode}
                 useWebSearch={useWebSearch}
+                webSearchDisabled={true}
                 inputRef={this.inputRef}
+                ragEnabled={this.state.ragEnabled}
+                ragCollections={this.state.ragCollections}
+                ragCollectionsLoading={this.state.ragCollectionsLoading}
+                ragCollectionsError={this.state.ragCollectionsError}
+                selectedRagCollectionId={this.state.selectedRagCollectionId}
+                onRagSelectCollection={this.selectRagCollection}
+                onRagCreateCollection={this.openCreateRagCollectionModal}
+                onRagManageDocuments={this.openManageRagDocumentsModal}
+                onRagRefreshCollections={() => this.loadRagCollections({ silent: true })}
                 personas={personas}
                 selectedPersona={selectedPersona}
                 onPersonaChange={this.handlePersonaChange}
                 onPersonaToggle={this.handlePersonaToggle}
                 showPersonaSelection={false} // Moved to header
               />
+
+              {this.state.ragEnabled && (
+                <>
+                  <CreateRagCollectionModal
+                    isOpen={this.state.isCreateRagCollectionModalOpen}
+                    onClose={this.closeCreateRagCollectionModal}
+                    onCreate={this.handleCreateRagCollection}
+                  />
+
+                  <ManageRagDocumentsModal
+                    isOpen={this.state.isManageRagDocumentsModalOpen}
+                    onClose={this.closeManageRagDocumentsModal}
+                    ragService={this.ragService}
+                    collection={
+                      this.state.manageRagDocumentsCollectionId
+                        ? (this.state.ragCollections.find((c) => c.id === this.state.manageRagDocumentsCollectionId) || null)
+                        : null
+                    }
+                  />
+                </>
+              )}
             </>
           )}
           

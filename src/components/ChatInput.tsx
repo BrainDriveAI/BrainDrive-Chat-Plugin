@@ -1,6 +1,6 @@
 import React from 'react';
-import { ModelInfo } from '../types';
-import { SendIcon, StopIcon } from '../icons';
+import { ModelInfo, RagCollection } from '../types';
+import { CheckIcon, ChevronRightIcon, DatabaseIcon, PersonaIcon, PlusIcon, SearchIcon, SendIcon, StopIcon, UploadIcon } from '../icons';
 
 interface ChatInputProps {
   inputText: string;
@@ -17,7 +17,19 @@ interface ChatInputProps {
 
   onToggleWebSearch: () => void;
   useWebSearch: boolean;
+  webSearchDisabled?: boolean;
   inputRef: React.RefObject<HTMLTextAreaElement>;
+
+  // RAG (collections) props
+  ragEnabled?: boolean;
+  ragCollections: RagCollection[];
+  ragCollectionsLoading: boolean;
+  ragCollectionsError: string | null;
+  selectedRagCollectionId: string | null;
+  onRagSelectCollection: (collectionId: string | null) => void;
+  onRagCreateCollection: () => void;
+  onRagManageDocuments: (collectionId: string) => void;
+  onRagRefreshCollections?: () => void;
   
   // Persona props
   personas: any[];
@@ -31,6 +43,8 @@ interface ChatInputState {
   isMenuOpen: boolean;
   showPersonaSelector: boolean;
   isMultiline: boolean;
+  isRagMenuOpen: boolean;
+  openRagCollectionId: string | null;
 }
 
 class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
@@ -41,7 +55,9 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
     this.state = {
       isMenuOpen: false,
       showPersonaSelector: false,
-      isMultiline: false
+      isMultiline: false,
+      isRagMenuOpen: false,
+      openRagCollectionId: null,
     };
   }
 
@@ -87,7 +103,7 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
 
   handleClickOutside = (event: MouseEvent) => {
     if (this.menuRef.current && !this.menuRef.current.contains(event.target as Node)) {
-      this.setState({ isMenuOpen: false });
+      this.setState({ isMenuOpen: false, isRagMenuOpen: false, openRagCollectionId: null });
     }
   };
 
@@ -111,21 +127,33 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
   };
 
   toggleMenu = () => {
-    this.setState(prevState => ({ isMenuOpen: !prevState.isMenuOpen }));
+    this.setState(prevState => ({
+      isMenuOpen: !prevState.isMenuOpen,
+      isRagMenuOpen: false,
+      openRagCollectionId: null,
+    }), () => {
+      if (this.state.isMenuOpen && this.props.onRagRefreshCollections) {
+        this.props.onRagRefreshCollections();
+      }
+    });
   };
 
   handleFileUpload = () => {
     if (this.props.onFileUpload) {
       this.props.onFileUpload();
     }
-    this.setState({ isMenuOpen: false });
+    this.setState({ isMenuOpen: false, isRagMenuOpen: false, openRagCollectionId: null });
   };
 
   handleWebSearchToggle = () => {
+    if (this.props.webSearchDisabled) {
+      this.setState({ isMenuOpen: false, isRagMenuOpen: false, openRagCollectionId: null });
+      return;
+    }
     if (this.props.onToggleWebSearch) {
       this.props.onToggleWebSearch();
     }
-    this.setState({ isMenuOpen: false });
+    this.setState({ isMenuOpen: false, isRagMenuOpen: false, openRagCollectionId: null });
   };
 
   handlePersonaToggle = () => {
@@ -141,9 +169,48 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
       
       return {
         showPersonaSelector: newShowPersonaSelector,
-        isMenuOpen: false
+        isMenuOpen: false,
+        isRagMenuOpen: false,
+        openRagCollectionId: null,
       };
     });
+  };
+
+  openRagMenu = () => {
+    if (this.props.ragEnabled === false) return;
+    this.setState({ isRagMenuOpen: true, openRagCollectionId: null });
+    if (this.props.onRagRefreshCollections) {
+      this.props.onRagRefreshCollections();
+    }
+  };
+
+  openRagCollectionMenu = (collectionId: string) => {
+    if (this.props.ragEnabled === false) return;
+    this.setState({ isRagMenuOpen: true, openRagCollectionId: collectionId });
+  };
+
+  closeAllMenus = () => {
+    this.setState({ isMenuOpen: false, isRagMenuOpen: false, openRagCollectionId: null });
+  };
+
+  handleRagClearSelection = () => {
+    this.props.onRagSelectCollection(null);
+    this.closeAllMenus();
+  };
+
+  handleRagCreateCollection = () => {
+    this.props.onRagCreateCollection();
+    this.closeAllMenus();
+  };
+
+  handleRagManageDocuments = (collectionId: string) => {
+    this.props.onRagManageDocuments(collectionId);
+    this.closeAllMenus();
+  };
+
+  handleRagSelectCollection = (collectionId: string) => {
+    this.props.onRagSelectCollection(collectionId);
+    this.closeAllMenus();
   };
 
   render() {
@@ -159,7 +226,13 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
       onSendMessage,
       onStopGeneration,
       useWebSearch,
+      webSearchDisabled,
       inputRef,
+      ragEnabled,
+      ragCollections,
+      ragCollectionsLoading,
+      ragCollectionsError,
+      selectedRagCollectionId,
       personas,
       selectedPersona,
       onPersonaChange,
@@ -167,13 +240,166 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
     } = this.props;
 
     // Local dropdown state retained for future menu use; not used in current layout
+    const isRagEnabled = ragEnabled !== false;
+
+    const selectedRagCollection = selectedRagCollectionId
+      ? ragCollections.find((collection) => collection.id === selectedRagCollectionId) || null
+      : null;
+    const ragMenuSubtext = !isRagEnabled
+      ? 'RAG unavailable'
+      : selectedRagCollection
+        ? `Selected: ${selectedRagCollection.name}`
+        : selectedRagCollectionId
+          ? 'Selected collection'
+          : 'Select a collection to enable RAG';
     
     return (
       <div className="chat-input-container">
         <div className="chat-input-wrapper">
           <div className="input-with-buttons">
             <div className={`chat-input-row ${this.state.isMultiline ? 'multiline' : ''}`}>
-              {/* Persona Selector - optional left control */}
+              {/* Left feature action */}
+              <div className="menu-container" ref={this.menuRef}>
+                <button
+                  type="button"
+                  className="input-button icon-button feature-button"
+                  onClick={this.toggleMenu}
+                  aria-label="Open feature menu"
+                  aria-expanded={this.state.isMenuOpen}
+                  disabled={isLoading || isLoadingHistory}
+                >
+                  <PlusIcon />
+                </button>
+
+                {this.state.isMenuOpen && (
+                  <div className="dropdown-menu feature-menu">
+                    <button
+                      className="menu-item menu-item-has-submenu"
+                      onClick={this.openRagMenu}
+                      disabled={isLoading || isLoadingHistory || !isRagEnabled}
+                    >
+                      <DatabaseIcon />
+                      <div className="menu-item-text">
+                        <span className="menu-item-title">RAG</span>
+                        <span className="menu-item-subtext">{ragMenuSubtext}</span>
+                      </div>
+                      <span className="menu-item-right">
+                        <ChevronRightIcon />
+                      </span>
+                    </button>
+                    <button className="menu-item" onClick={this.handleFileUpload} disabled={isLoading || isLoadingHistory}>
+                      <UploadIcon />
+                      <div className="menu-item-text">
+                        <span className="menu-item-title">Attach file</span>
+                        <span className="menu-item-subtext">Upload docs to ground responses</span>
+                      </div>
+                    </button>
+                    <button className="menu-item" onClick={this.handleWebSearchToggle} disabled={isLoading || isLoadingHistory || !!webSearchDisabled}>
+                      <SearchIcon isActive={useWebSearch} />
+                      <div className="menu-item-text">
+                        <span className="menu-item-title">Web search</span>
+                        <span className="menu-item-subtext">
+                          {webSearchDisabled ? 'Disabled for now' : `${useWebSearch ? 'Disable' : 'Enable'} live search for answers`}
+                        </span>
+                      </div>
+                    </button>
+                    {showPersonaSelection && (
+                      <button className="menu-item" onClick={this.handlePersonaToggle} disabled={isLoading || isLoadingHistory}>
+                        <PersonaIcon />
+                        <div className="menu-item-text">
+                          <span className="menu-item-title">Personas</span>
+                          <span className="menu-item-subtext">
+                            {this.state.showPersonaSelector ? 'Hide selector' : 'Choose a voice'}
+                          </span>
+                        </div>
+                      </button>
+                    )}
+
+                    {/* RAG submenu */}
+                    {isRagEnabled && this.state.isRagMenuOpen && (
+                      <div className="dropdown-menu feature-menu menu-submenu" role="menu">
+                        <button className="menu-item" onClick={this.handleRagClearSelection} disabled={isLoading || isLoadingHistory}>
+                          <span className="menu-item-title">No collection</span>
+                          <span className="menu-item-right">
+                            {!selectedRagCollectionId && <span className="menu-item-check"><CheckIcon /></span>}
+                          </span>
+                        </button>
+
+                        <button className="menu-item" onClick={this.handleRagCreateCollection} disabled={isLoading || isLoadingHistory}>
+                          <span className="menu-item-title">Create Collection…</span>
+                        </button>
+
+                        <div className="menu-divider" />
+
+                        {ragCollectionsLoading && (
+                          <button className="menu-item" disabled>
+                            <span className="menu-item-title">Loading collections…</span>
+                          </button>
+                        )}
+
+                        {!ragCollectionsLoading && ragCollectionsError && (
+                          <button className="menu-item" disabled title={ragCollectionsError}>
+                            <div className="menu-item-text">
+                              <span className="menu-item-title">Unable to load collections</span>
+                              <span className="menu-item-subtext">{ragCollectionsError}</span>
+                            </div>
+                          </button>
+                        )}
+
+                        {!ragCollectionsLoading && !ragCollectionsError && ragCollections.length === 0 && (
+                          <button className="menu-item" disabled>
+                            <div className="menu-item-text">
+                              <span className="menu-item-title">No collections yet</span>
+                              <span className="menu-item-subtext">Create one to enable RAG</span>
+                            </div>
+                          </button>
+                        )}
+
+                        {!ragCollectionsLoading && !ragCollectionsError && ragCollections.map((collection) => {
+                          const isSelected = selectedRagCollectionId === collection.id;
+                          return (
+                            <button
+                              key={collection.id}
+                              className="menu-item menu-item-has-submenu"
+                              onClick={() => this.openRagCollectionMenu(collection.id)}
+                              disabled={isLoading || isLoadingHistory}
+                              title={collection.description || collection.name}
+                            >
+                              <span className="menu-item-title">{collection.name}</span>
+                              <span className="menu-item-right">
+                                {isSelected && <span className="menu-item-check"><CheckIcon /></span>}
+                                <ChevronRightIcon />
+                              </span>
+                            </button>
+                          );
+                        })}
+
+                        {/* Collection submenu */}
+                        {this.state.openRagCollectionId && (
+                          <div className="dropdown-menu feature-menu menu-submenu" role="menu">
+                            <button
+                              className="menu-item"
+                              onClick={() => this.handleRagManageDocuments(this.state.openRagCollectionId!)}
+                              disabled={isLoading || isLoadingHistory}
+                            >
+                              <span className="menu-item-title">Manage Documents…</span>
+                            </button>
+                            <button
+                              className="menu-item"
+                              onClick={() => this.handleRagSelectCollection(this.state.openRagCollectionId!)}
+                              disabled={isLoading || isLoadingHistory}
+                            >
+                              <span className="menu-item-title">Select</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Persona Selector - optional inline control */}
               {showPersonaSelection && (
                 <select
                   value={selectedPersona?.id || ''}
@@ -212,6 +438,7 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
                 disabled={(!inputText.trim() && !isStreaming) || isLoadingHistory || !selectedModel}
                 className={`input-button send-button ${isStreaming ? 'stop-button' : ''}`}
                 title={isStreaming ? "Stop generation" : "Send message"}
+                type="button"
               >
                 {isStreaming ? <StopIcon /> : <SendIcon />}
               </button>

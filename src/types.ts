@@ -33,6 +33,17 @@ export interface ChatMessage {
     truncated?: boolean;
     mode?: 'one-shot' | 'persist';
   };
+
+  // Retrieved chunks context (RAG collection retrieval)
+  isRetrievedContext?: boolean;
+  retrievalData?: {
+    collectionId?: string;
+    collectionName?: string;
+    chunks: RagDocumentChunk[];
+    context: string;
+    intent?: RagIntentResponse | null;
+    metadata?: Record<string, any>;
+  };
   // Markdown toggle
   showRawMarkdown?: boolean;
   
@@ -181,6 +192,71 @@ export interface SupportedFileTypes {
   canonical_types?: string[];
   extensions?: string[];
 }
+
+// =========================
+// RAG (Collections) Types
+// =========================
+
+export interface RagCollection {
+  id: string;
+  name: string;
+  description: string;
+  color: string;
+  created_at: string;
+  updated_at: string;
+  document_count: number;
+  chat_session_count?: number;
+}
+
+export interface RagCreateCollectionInput {
+  name: string;
+  description?: string;
+  color?: string;
+}
+
+export type RagDocumentStatus = 'uploaded' | 'processing' | 'processed' | 'failed' | string;
+
+export interface RagDocument {
+  id: string;
+  original_filename: string;
+  file_size: number;
+  document_type: string;
+  collection_id: string;
+  status: RagDocumentStatus;
+  created_at: string;
+  processed_at: string;
+  error_message?: string;
+  metadata?: Record<string, any>;
+  chunk_count: number;
+}
+
+export interface RagDocumentChunk {
+  id: string;
+  document_id: string;
+  collection_id: string;
+  content: string;
+  chunk_index: number;
+  chunk_type: string;
+  parent_chunk_id?: string;
+  metadata: Record<string, any>;
+  embedding_vector?: number[];
+}
+
+export interface RagIntentResponse {
+  type: string;
+  requires_retrieval: boolean;
+  requires_collection_scan: boolean;
+  confidence: number;
+  reasoning: string;
+}
+
+export interface RagContextRetrievalResult {
+  chunks: RagDocumentChunk[];
+  intent: RagIntentResponse | null;
+  requires_generation: boolean;
+  generation_type: string;
+  metadata: Record<string, any>;
+}
 // Service interfaces
 export interface ApiService {
   get: (url: string, options?: any) => Promise<ApiResponse>;
@@ -291,6 +367,16 @@ export interface BrainDriveChatState {
     mode?: 'one-shot' | 'persist';
   } | null;
   isProcessingDocuments: boolean;
+
+  // RAG (collections) state
+  ragEnabled: boolean;
+  ragCollections: RagCollection[];
+  ragCollectionsLoading: boolean;
+  ragCollectionsError: string | null;
+  selectedRagCollectionId: string | null;
+  isCreateRagCollectionModalOpen: boolean;
+  isManageRagDocumentsModalOpen: boolean;
+  manageRagDocumentsCollectionId: string | null;
   
   // Scroll state
   isNearBottom: boolean;
