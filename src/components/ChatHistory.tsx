@@ -63,6 +63,22 @@ class ChatHistory extends React.Component<ChatHistoryProps, ChatHistoryState> {
     };
   }
 
+  shouldComponentUpdate(nextProps: ChatHistoryProps, nextState: ChatHistoryState) {
+    if (this.state.expandedSearchResults !== nextState.expandedSearchResults) return true;
+    if (this.state.expandedDocumentContext !== nextState.expandedDocumentContext) return true;
+    if (this.state.expandedRetrievedContext !== nextState.expandedRetrievedContext) return true;
+
+    if (this.props.messages !== nextProps.messages) return true;
+    if (this.props.isLoading !== nextProps.isLoading) return true;
+    if (this.props.isLoadingHistory !== nextProps.isLoadingHistory) return true;
+    if (this.props.error !== nextProps.error) return true;
+    if (this.props.editingMessageId !== nextProps.editingMessageId) return true;
+    if (this.props.editingContent !== nextProps.editingContent) return true;
+    if (this.props.showScrollToBottom !== nextProps.showScrollToBottom) return true;
+
+    return false;
+  }
+
   private renderRetrievedContextBlock = (messageId: string, retrievalData: NonNullable<ChatMessage['retrievalData']>) => {
     const isExpanded = this.state.expandedRetrievedContext.has(messageId);
     const chunkCount = retrievalData.chunks?.length || 0;
