@@ -2026,6 +2026,10 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     });
   };
 
+  handleEditingContentChange = (content: string) => {
+    this.setState({ editingContent: content });
+  };
+
   /**
    * Toggle markdown view for a message
    */
@@ -3164,7 +3168,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
                   onStartEditing={this.startEditingMessage}
                   onCancelEditing={this.cancelEditingMessage}
                   onSaveEditing={this.saveEditedMessage}
-                  onEditingContentChange={(content) => this.setState({ editingContent: content })}
+                  onEditingContentChange={this.handleEditingContentChange}
                   onRegenerateResponse={this.regenerateResponse}
                   onContinueGeneration={this.continueGeneration}
                   showScrollToBottom={this.state.showScrollToBottom}
