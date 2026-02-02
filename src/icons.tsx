@@ -133,6 +133,12 @@ export const SearchIcon = ({ isActive }: { isActive?: boolean }) => (
   </svg>
 );
 
+export const LibraryIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M18 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 4h5v8l-2.5-1.5L6 12V4z"/>
+  </svg>
+);
+
 export const DatabaseIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
     <path d="M2 20h20v-4H2v4zm0-18v4h20V2H2zm0 10h20V8H2v4z" />

@@ -10,7 +10,9 @@ import {
   DocumentProcessingResult,
   DocumentContextResult,
   RagCollection,
-  RagCreateCollectionInput
+  RagCreateCollectionInput,
+  LibraryProject,
+  LibraryScope
 } from './types';
 import {
   generateId
@@ -38,7 +40,7 @@ import {
 } from './components';
 
 // Import services
-import { AIService, SearchService, DocumentService, RagService } from './services';
+import { AIService, SearchService, DocumentService, RagService, LibraryService } from './services';
 
 // Import icons
 // Icons previously used in the bottom history panel are no longer needed here
@@ -65,6 +67,8 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   private searchService: SearchService | null = null;
   private documentService: DocumentService | null = null;
   private ragService: RagService | null = null;
+  private libraryService: LibraryService | null = null;
+  private libraryProjects: LibraryProject[] = [];
   private currentStreamingAbortController: AbortController | null = null;
   private menuButtonRef: HTMLButtonElement | null = null;
   // Keep the live edge comfortably in view instead of snapping flush bottom
@@ -151,6 +155,9 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       isCreateRagCollectionModalOpen: false,
       isManageRagDocumentsModalOpen: false,
       manageRagDocumentsCollectionId: null,
+
+      // Library state
+      libraryScope: { enabled: false, project: null },
       
       // Scroll state
       isNearBottom: true,
@@ -192,6 +199,9 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
 
     // Initialize RAG service (collections + retrieval) using shared services
     this.ragService = new RagService(props.services);
+
+    // Initialize Library service
+    this.libraryService = new LibraryService(props.services.api);
   }
 
   /**
@@ -269,6 +279,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     this.loadInitialData();
     this.loadSavedStreamingMode();
     this.loadPersonas();
+    this.loadLibraryProjects();
     
     // Add global key event listener for ESC key
     document.addEventListener('keydown', this.handleGlobalKeyPress);
@@ -2743,6 +2754,45 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   };
 
   /**
+   * Toggle Library scope on/off
+   */
+  handleLibraryToggle = () => {
+    this.setState(prevState => ({
+      libraryScope: {
+        ...prevState.libraryScope,
+        enabled: !prevState.libraryScope.enabled,
+        project: !prevState.libraryScope.enabled ? prevState.libraryScope.project : null,
+      }
+    }));
+  };
+
+  /**
+   * Select a Library project (null = "All")
+   */
+  handleLibrarySelectProject = (project: LibraryProject | null) => {
+    this.setState({
+      libraryScope: {
+        enabled: true,
+        project,
+      }
+    });
+  };
+
+  /**
+   * Load library projects list
+   */
+  loadLibraryProjects = async () => {
+    if (!this.libraryService) return;
+    try {
+      const projects = await this.libraryService.fetchProjects('active');
+      this.libraryProjects = projects;
+      this.forceUpdate();
+    } catch (err) {
+      console.error('Failed to load library projects:', err);
+    }
+  };
+
+  /**
    * Handle sending a message
    */
   handleSendMessage = () => {
@@ -2859,6 +2909,32 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         }
       }
       
+      // Library context injection if enabled
+      if (this.state.libraryScope.enabled && this.libraryService) {
+        try {
+          let libraryContext = '';
+          if (this.state.libraryScope.project) {
+            const ctx = await this.libraryService.fetchProjectContext(
+              this.state.libraryScope.project.slug,
+              this.state.libraryScope.project.lifecycle || 'active'
+            );
+            if (ctx?.files) {
+              const fileEntries = Object.entries(ctx.files)
+                .map(([name, f]) => `--- ${name} ---\n${f.content}`)
+                .join('\n\n');
+              libraryContext = `[LIBRARY CONTEXT - Project: ${this.state.libraryScope.project.name}]\n${fileEntries}\n[END LIBRARY CONTEXT]`;
+            }
+          } else {
+            libraryContext = '[LIBRARY CONTEXT - Scope: All projects]\nThe user has enabled Library access to all projects. You can help them read and write files in their BrainDrive Library.\n[END LIBRARY CONTEXT]';
+          }
+          if (libraryContext) {
+            enhancedPrompt = `${libraryContext}\n\n${enhancedPrompt}`;
+          }
+        } catch (libError) {
+          console.error('Library context error:', libError);
+        }
+      }
+
       // Perform web search if enabled
       
       if (this.state.useWebSearch && this.searchService) {
@@ -3211,6 +3287,10 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
                 onPersonaChange={this.handlePersonaChange}
                 onPersonaToggle={this.handlePersonaToggle}
                 showPersonaSelection={false} // Moved to header
+                libraryScope={this.state.libraryScope}
+                libraryProjects={this.libraryProjects}
+                onLibraryToggle={this.handleLibraryToggle}
+                onLibrarySelectProject={this.handleLibrarySelectProject}
               />
 
               {this.state.ragEnabled && (
@@ -3244,6 +3324,6 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
 }
 
 // Add version information for debugging and tracking
-(BrainDriveChat as any).version = '1.0.1';
+(BrainDriveChat as any).version = '1.0.26';
 
 export default BrainDriveChat;

@@ -1,11 +1,13 @@
 {
   "name": "braindrive-chat",
-  "version": "1.0.25",
+  "version": "1.0.27",
   "description": "Comprehensive AI chat interface with model selection and conversation history",
   "main": "dist/remoteEntry.js",
   "scripts": {
-    "build": "webpack --mode production",
-    "dev": "webpack --mode development --watch",
+    "build": "webpack --env release=true",
+    "build:local": "webpack --env release=false",
+    "build:release": "webpack --env release=true",
+    "dev": "webpack serve --mode development",
     "start": "webpack serve --mode development",
     "clean": "rm -rf dist"
   },
