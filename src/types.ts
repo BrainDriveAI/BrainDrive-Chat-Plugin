@@ -257,6 +257,23 @@ export interface RagContextRetrievalResult {
   generation_type: string;
   metadata: Record<string, any>;
 }
+
+// Library types
+export interface LibraryProject {
+  name: string;
+  slug: string;
+  lifecycle: string;
+  path: string;
+  has_agent_md: boolean;
+  has_spec: boolean;
+  has_build_plan: boolean;
+  has_decisions: boolean;
+}
+
+export interface LibraryScope {
+  enabled: boolean;
+  project: LibraryProject | null; // null = "All"
+}
 // Service interfaces
 export interface ApiService {
   get: (url: string, options?: any) => Promise<ApiResponse>;
@@ -378,6 +395,9 @@ export interface BrainDriveChatState {
   isManageRagDocumentsModalOpen: boolean;
   manageRagDocumentsCollectionId: string | null;
   
+  // Library state
+  libraryScope: LibraryScope;
+
   // Scroll state
   isNearBottom: boolean;
   showScrollToBottom: boolean;

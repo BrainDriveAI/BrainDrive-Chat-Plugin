@@ -47,53 +47,24 @@ interface ChatHistoryProps {
   onUserScrollIntent?: (source: ScrollIntentSource) => void;
 }
 
-type MessageListProps = Omit<ChatHistoryProps, 'showScrollToBottom' | 'onScrollToBottom'>;
-
-interface MessageListState {
+interface ChatHistoryState {
   expandedSearchResults: Set<string>;
   expandedDocumentContext: Set<string>;
   expandedRetrievedContext: Set<string>;
 }
 
-interface MessageItemProps {
-  message: ChatMessage;
-  isEditing: boolean;
-  editingContent: string;
-  isSearchResultsExpanded: boolean;
-  isDocumentContextExpanded: boolean;
-  isRetrievedContextExpanded: boolean;
-  onToggleSearchResults: (messageId: string) => void;
-  onToggleDocumentContext: (messageId: string) => void;
-  onToggleRetrievedContext: (messageId: string) => void;
-  onStartEditing: (messageId: string, content: string) => void;
-  onCancelEditing: () => void;
-  onSaveEditing: () => void;
-  onEditingContentChange: (content: string) => void;
-  onRegenerateResponse: () => void;
-  onContinueGeneration: () => void;
-  onToggleMarkdown?: (messageId: string) => void;
-}
-
-class MessageItem extends React.Component<MessageItemProps> {
-  shouldComponentUpdate(nextProps: MessageItemProps) {
-    if (this.props.message !== nextProps.message) return true;
-    if (this.props.isEditing !== nextProps.isEditing) return true;
-    if (this.props.isSearchResultsExpanded !== nextProps.isSearchResultsExpanded) return true;
-    if (this.props.isDocumentContextExpanded !== nextProps.isDocumentContextExpanded) return true;
-    if (this.props.isRetrievedContextExpanded !== nextProps.isRetrievedContextExpanded) return true;
-
-    if ((this.props.isEditing || nextProps.isEditing) && this.props.editingContent !== nextProps.editingContent) {
-      return true;
-    }
-
-    return false;
+class ChatHistory extends React.Component<ChatHistoryProps, ChatHistoryState> {
+  constructor(props: ChatHistoryProps) {
+    super(props);
+    this.state = {
+      expandedSearchResults: new Set(),
+      expandedDocumentContext: new Set(),
+      expandedRetrievedContext: new Set(),
+    };
   }
 
-  private renderRetrievedContextBlock = (
-    messageId: string,
-    retrievalData: NonNullable<ChatMessage['retrievalData']>,
-    isExpanded: boolean
-  ) => {
+  private renderRetrievedContextBlock = (messageId: string, retrievalData: NonNullable<ChatMessage['retrievalData']>) => {
+    const isExpanded = this.state.expandedRetrievedContext.has(messageId);
     const chunkCount = retrievalData.chunks?.length || 0;
     const collectionLabel = retrievalData.collectionName || 'Selected collection';
 
@@ -102,7 +73,7 @@ class MessageItem extends React.Component<MessageItemProps> {
         <button
           type="button"
           className="retrieved-context-header-btn"
-          onClick={() => this.props.onToggleRetrievedContext(messageId)}
+          onClick={() => this.toggleRetrievedContext(messageId)}
           aria-expanded={isExpanded}
         >
           <span className="retrieved-context-title-row">
@@ -142,6 +113,75 @@ class MessageItem extends React.Component<MessageItemProps> {
     );
   };
 
+  emitScrollIntent = (source: ScrollIntentSource) => {
+    if (this.props.onUserScrollIntent) {
+      this.props.onUserScrollIntent(source);
+    }
+  };
+
+  handlePointerDown = () => {
+    this.emitScrollIntent('pointer');
+  };
+
+  handleWheel = () => {
+    this.emitScrollIntent('wheel');
+  };
+
+  handleTouchStart = () => {
+    this.emitScrollIntent('touch');
+  };
+
+  handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (KEYBOARD_SCROLL_KEYS.has(event.key)) {
+      this.emitScrollIntent('key');
+    }
+  };
+
+  /**
+   * Toggle search results expansion
+   */
+  toggleSearchResults = (messageId: string) => {
+    this.setState(prevState => {
+      const newSet = new Set(prevState.expandedSearchResults);
+      if (newSet.has(messageId)) {
+        newSet.delete(messageId);
+      } else {
+        newSet.add(messageId);
+      }
+      return { expandedSearchResults: newSet };
+    });
+  };
+
+  /**
+   * Toggle document context expansion
+   */
+  toggleDocumentContext = (messageId: string) => {
+    this.setState(prevState => {
+      const newSet = new Set(prevState.expandedDocumentContext);
+      if (newSet.has(messageId)) {
+        newSet.delete(messageId);
+      } else {
+        newSet.add(messageId);
+      }
+      return { expandedDocumentContext: newSet };
+    });
+  };
+
+  /**
+   * Toggle retrieved context expansion
+   */
+  toggleRetrievedContext = (messageId: string) => {
+    this.setState(prevState => {
+      const newSet = new Set(prevState.expandedRetrievedContext);
+      if (newSet.has(messageId)) {
+        newSet.delete(messageId);
+      } else {
+        newSet.add(messageId);
+      }
+      return { expandedRetrievedContext: newSet };
+    });
+  };
+
   /**
    * Render search result item
    */
@@ -170,12 +210,11 @@ class MessageItem extends React.Component<MessageItemProps> {
   /**
    * Render document context message
    */
-  renderDocumentContext = () => {
-    const { message } = this.props;
+  renderDocumentContext = (message: ChatMessage) => {
     const { documentData } = message;
     if (!documentData) return null;
 
-    const isExpanded = this.props.isDocumentContextExpanded;
+    const isExpanded = this.state.expandedDocumentContext.has(message.id);
     const { results } = documentData;
     const filename = documentData.filename || (results && results.length === 1 ? results[0].filename : undefined) || 'Document';
     const segmentCount = documentData.segmentCount || (results ? results.length : undefined);
@@ -199,7 +238,7 @@ class MessageItem extends React.Component<MessageItemProps> {
                 </span>
               </div>
               <button
-                onClick={() => this.props.onToggleDocumentContext(message.id)}
+                onClick={() => this.toggleDocumentContext(message.id)}
                 className="document-toggle-btn"
                 title={isExpanded ? "Hide document content" : "Show document content"}
               >
@@ -231,8 +270,7 @@ class MessageItem extends React.Component<MessageItemProps> {
   /**
    * Render retrieved context (RAG chunks) message
    */
-  renderRetrievedContextMessage = () => {
-    const { message } = this.props;
+  renderRetrievedContextMessage = (message: ChatMessage) => {
     const { retrievalData } = message;
     if (!retrievalData) return null;
 
@@ -240,7 +278,7 @@ class MessageItem extends React.Component<MessageItemProps> {
       <div key={message.id} className="message message-ai message-retrieved-context">
         <div className="message-bubble">
           <div className="message-body">
-            {this.renderRetrievedContextBlock(message.id, retrievalData, this.props.isRetrievedContextExpanded)}
+            {this.renderRetrievedContextBlock(message.id, retrievalData)}
           </div>
           <div className="message-meta">
             <span className="message-timestamp">{formatTimestamp(message.timestamp)}</span>
@@ -250,15 +288,16 @@ class MessageItem extends React.Component<MessageItemProps> {
     );
   };
 
+
+
   /**
    * Render search results message
    */
-  renderSearchResultsMessage = () => {
-    const { message } = this.props;
+  renderSearchResultsMessage = (message: ChatMessage) => {
     const { searchData } = message;
     if (!searchData) return null;
 
-    const isExpanded = this.props.isSearchResultsExpanded;
+    const isExpanded = this.state.expandedSearchResults.has(message.id);
     const hasScrapedContent = searchData.scrapedContent && searchData.successfulScrapes && searchData.successfulScrapes > 0;
 
     return (
@@ -278,7 +317,7 @@ class MessageItem extends React.Component<MessageItemProps> {
               </div>
               <button
                 className="search-toggle-btn"
-                onClick={() => this.props.onToggleSearchResults(message.id)}
+                onClick={() => this.toggleSearchResults(message.id)}
                 aria-label={isExpanded ? "Collapse search results" : "Expand search results"}
               >
                 <span className="search-toggle-icon">
@@ -317,22 +356,20 @@ class MessageItem extends React.Component<MessageItemProps> {
   /**
    * Render a chat message
    */
-  renderMessage = () => {
-    const { message } = this.props;
-
+  renderMessage = (message: ChatMessage) => {
     // Handle search results messages separately
     if (message.isSearchResults) {
-      return this.renderSearchResultsMessage();
+      return this.renderSearchResultsMessage(message);
     }
 
     // Handle document context messages separately
     if (message.isDocumentContext) {
-      return this.renderDocumentContext();
+      return this.renderDocumentContext(message);
     }
 
     // Handle retrieved context messages separately
     if (message.isRetrievedContext) {
-      return this.renderRetrievedContextMessage();
+      return this.renderRetrievedContextMessage(message);
     }
 
     // Handle thinking tags in content
@@ -365,7 +402,7 @@ class MessageItem extends React.Component<MessageItemProps> {
       }
     }
 
-    const isEditing = this.props.isEditing;
+    const isEditing = this.props.editingMessageId === message.id;
     const messageClassNames = [
       'message',
       `message-${sender}`,
@@ -521,7 +558,7 @@ class MessageItem extends React.Component<MessageItemProps> {
         <div className="message-bubble">
           <div className="message-body">
             {showRetrievedContextInline && message.retrievalData && (
-              this.renderRetrievedContextBlock(message.id, message.retrievalData, this.props.isRetrievedContextExpanded)
+              this.renderRetrievedContextBlock(message.id, message.retrievalData)
             )}
 
             {sender === 'ai' && thinkingContent && (
@@ -558,104 +595,6 @@ class MessageItem extends React.Component<MessageItemProps> {
         </div>
       </div>
     );
-  };
-
-  render() {
-    return this.renderMessage();
-  }
-}
-
-class MessageList extends React.Component<MessageListProps, MessageListState> {
-  constructor(props: MessageListProps) {
-    super(props);
-    this.state = {
-      expandedSearchResults: new Set(),
-      expandedDocumentContext: new Set(),
-      expandedRetrievedContext: new Set(),
-    };
-  }
-
-  shouldComponentUpdate(nextProps: MessageListProps, nextState: MessageListState) {
-    if (this.state.expandedSearchResults !== nextState.expandedSearchResults) return true;
-    if (this.state.expandedDocumentContext !== nextState.expandedDocumentContext) return true;
-    if (this.state.expandedRetrievedContext !== nextState.expandedRetrievedContext) return true;
-
-    if (this.props.messages !== nextProps.messages) return true;
-    if (this.props.isLoadingHistory !== nextProps.isLoadingHistory) return true;
-    if (this.props.error !== nextProps.error) return true;
-    if (this.props.editingMessageId !== nextProps.editingMessageId) return true;
-    if (this.props.editingContent !== nextProps.editingContent) return true;
-
-    return false;
-  }
-
-  emitScrollIntent = (source: ScrollIntentSource) => {
-    if (this.props.onUserScrollIntent) {
-      this.props.onUserScrollIntent(source);
-    }
-  };
-
-  handlePointerDown = () => {
-    this.emitScrollIntent('pointer');
-  };
-
-  handleWheel = () => {
-    this.emitScrollIntent('wheel');
-  };
-
-  handleTouchStart = () => {
-    this.emitScrollIntent('touch');
-  };
-
-  handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (KEYBOARD_SCROLL_KEYS.has(event.key)) {
-      this.emitScrollIntent('key');
-    }
-  };
-
-  /**
-   * Toggle search results expansion
-   */
-  toggleSearchResults = (messageId: string) => {
-    this.setState(prevState => {
-      const newSet = new Set(prevState.expandedSearchResults);
-      if (newSet.has(messageId)) {
-        newSet.delete(messageId);
-      } else {
-        newSet.add(messageId);
-      }
-      return { expandedSearchResults: newSet };
-    });
-  };
-
-  /**
-   * Toggle document context expansion
-   */
-  toggleDocumentContext = (messageId: string) => {
-    this.setState(prevState => {
-      const newSet = new Set(prevState.expandedDocumentContext);
-      if (newSet.has(messageId)) {
-        newSet.delete(messageId);
-      } else {
-        newSet.add(messageId);
-      }
-      return { expandedDocumentContext: newSet };
-    });
-  };
-
-  /**
-   * Toggle retrieved context expansion
-   */
-  toggleRetrievedContext = (messageId: string) => {
-    this.setState(prevState => {
-      const newSet = new Set(prevState.expandedRetrievedContext);
-      if (newSet.has(messageId)) {
-        newSet.delete(messageId);
-      } else {
-        newSet.add(messageId);
-      }
-      return { expandedRetrievedContext: newSet };
-    });
   };
 
   /**
@@ -704,69 +643,6 @@ class MessageList extends React.Component<MessageListProps, MessageListState> {
     );
   };
 
-  render() {
-    const { messages, isLoadingHistory, chatHistoryRef } = this.props;
-
-    return (
-      <div 
-        ref={chatHistoryRef}
-        className="chat-history"
-        onScroll={this.props.onScroll}
-        onPointerDown={this.handlePointerDown}
-        onWheel={this.handleWheel}
-        onTouchStart={this.handleTouchStart}
-        onKeyDown={this.handleKeyDown}
-        tabIndex={0}
-      >
-        {/* Show error if any */}
-        {this.renderError()}
-        
-        {/* Show loading indicator for history */}
-        {isLoadingHistory && this.renderLoadingIndicator()}
-        
-        {/* Show empty state or messages */}
-        {!isLoadingHistory && messages.length === 0 ? (
-          this.renderEmptyState()
-        ) : (
-          messages.map(message => (
-            <MessageItem
-              key={message.id}
-              message={message}
-              isEditing={this.props.editingMessageId === message.id}
-              editingContent={this.props.editingContent}
-              isSearchResultsExpanded={this.state.expandedSearchResults.has(message.id)}
-              isDocumentContextExpanded={this.state.expandedDocumentContext.has(message.id)}
-              isRetrievedContextExpanded={this.state.expandedRetrievedContext.has(message.id)}
-              onToggleSearchResults={this.toggleSearchResults}
-              onToggleDocumentContext={this.toggleDocumentContext}
-              onToggleRetrievedContext={this.toggleRetrievedContext}
-              onStartEditing={this.props.onStartEditing}
-              onCancelEditing={this.props.onCancelEditing}
-              onSaveEditing={this.props.onSaveEditing}
-              onEditingContentChange={this.props.onEditingContentChange}
-              onRegenerateResponse={this.props.onRegenerateResponse}
-              onContinueGeneration={this.props.onContinueGeneration}
-              onToggleMarkdown={this.props.onToggleMarkdown}
-            />
-          ))
-        )}
-      </div>
-    );
-  }
-}
-
-class ChatHistory extends React.Component<ChatHistoryProps> {
-  shouldComponentUpdate(nextProps: ChatHistoryProps) {
-    if (this.props.messages !== nextProps.messages) return true;
-    if (this.props.isLoadingHistory !== nextProps.isLoadingHistory) return true;
-    if (this.props.error !== nextProps.error) return true;
-    if (this.props.editingMessageId !== nextProps.editingMessageId) return true;
-    if (this.props.editingContent !== nextProps.editingContent) return true;
-    if (this.props.showScrollToBottom !== nextProps.showScrollToBottom) return true;
-
-    return false;
-  }
-
   /**
    * Render scroll to bottom button
    */
@@ -789,26 +665,35 @@ class ChatHistory extends React.Component<ChatHistoryProps> {
   };
 
   render() {
+    const { messages, isLoadingHistory, chatHistoryRef } = this.props;
+
     return (
       <div className="chat-history-container">
-        <MessageList
-          messages={this.props.messages}
-          isLoading={this.props.isLoading}
-          isLoadingHistory={this.props.isLoadingHistory}
-          error={this.props.error}
-          chatHistoryRef={this.props.chatHistoryRef}
-          editingMessageId={this.props.editingMessageId}
-          editingContent={this.props.editingContent}
-          onStartEditing={this.props.onStartEditing}
-          onCancelEditing={this.props.onCancelEditing}
-          onSaveEditing={this.props.onSaveEditing}
-          onEditingContentChange={this.props.onEditingContentChange}
-          onRegenerateResponse={this.props.onRegenerateResponse}
-          onContinueGeneration={this.props.onContinueGeneration}
-          onToggleMarkdown={this.props.onToggleMarkdown}
+        <div 
+          ref={chatHistoryRef}
+          className="chat-history"
           onScroll={this.props.onScroll}
-          onUserScrollIntent={this.props.onUserScrollIntent}
-        />
+          onPointerDown={this.handlePointerDown}
+          onWheel={this.handleWheel}
+          onTouchStart={this.handleTouchStart}
+          onKeyDown={this.handleKeyDown}
+          tabIndex={0}
+        >
+          {/* Show error if any */}
+          {this.renderError()}
+          
+          {/* Show loading indicator for history */}
+          {isLoadingHistory && this.renderLoadingIndicator()}
+          
+          {/* Show empty state or messages */}
+          {!isLoadingHistory && messages.length === 0 ? (
+            this.renderEmptyState()
+          ) : (
+            messages.map(message => this.renderMessage(message))
+          )}
+        </div>
+        
+        {/* Scroll to bottom button */}
         {this.renderScrollToBottomButton()}
       </div>
     );

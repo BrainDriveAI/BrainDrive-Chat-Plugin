@@ -1,6 +1,6 @@
 import React from 'react';
-import { ModelInfo, RagCollection } from '../types';
-import { CheckIcon, ChevronRightIcon, DatabaseIcon, PersonaIcon, PlusIcon, SearchIcon, SendIcon, StopIcon, UploadIcon } from '../icons';
+import { ModelInfo, RagCollection, LibraryProject, LibraryScope } from '../types';
+import { CheckIcon, ChevronRightIcon, DatabaseIcon, LibraryIcon, PersonaIcon, PlusIcon, SearchIcon, SendIcon, StopIcon, UploadIcon } from '../icons';
 
 interface ChatInputProps {
   inputText: string;
@@ -37,6 +37,12 @@ interface ChatInputProps {
   onPersonaChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
   onPersonaToggle?: () => void;
   showPersonaSelection: boolean;
+
+  // Library props
+  libraryScope?: LibraryScope;
+  libraryProjects?: LibraryProject[];
+  onLibraryToggle?: () => void;
+  onLibrarySelectProject?: (project: LibraryProject | null) => void;
 }
 
 interface ChatInputState {
@@ -45,6 +51,7 @@ interface ChatInputState {
   isMultiline: boolean;
   isRagMenuOpen: boolean;
   openRagCollectionId: string | null;
+  isLibraryMenuOpen: boolean;
 }
 
 class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
@@ -58,6 +65,7 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
       isMultiline: false,
       isRagMenuOpen: false,
       openRagCollectionId: null,
+      isLibraryMenuOpen: false,
     };
   }
 
@@ -103,7 +111,7 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
 
   handleClickOutside = (event: MouseEvent) => {
     if (this.menuRef.current && !this.menuRef.current.contains(event.target as Node)) {
-      this.setState({ isMenuOpen: false, isRagMenuOpen: false, openRagCollectionId: null });
+      this.setState({ isMenuOpen: false, isRagMenuOpen: false, openRagCollectionId: null, isLibraryMenuOpen: false });
     }
   };
 
@@ -142,18 +150,18 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
     if (this.props.onFileUpload) {
       this.props.onFileUpload();
     }
-    this.setState({ isMenuOpen: false, isRagMenuOpen: false, openRagCollectionId: null });
+    this.setState({ isMenuOpen: false, isRagMenuOpen: false, openRagCollectionId: null, isLibraryMenuOpen: false });
   };
 
   handleWebSearchToggle = () => {
     if (this.props.webSearchDisabled) {
-      this.setState({ isMenuOpen: false, isRagMenuOpen: false, openRagCollectionId: null });
+      this.setState({ isMenuOpen: false, isRagMenuOpen: false, openRagCollectionId: null, isLibraryMenuOpen: false });
       return;
     }
     if (this.props.onToggleWebSearch) {
       this.props.onToggleWebSearch();
     }
-    this.setState({ isMenuOpen: false, isRagMenuOpen: false, openRagCollectionId: null });
+    this.setState({ isMenuOpen: false, isRagMenuOpen: false, openRagCollectionId: null, isLibraryMenuOpen: false });
   };
 
   handlePersonaToggle = () => {
@@ -172,6 +180,7 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
         isMenuOpen: false,
         isRagMenuOpen: false,
         openRagCollectionId: null,
+        isLibraryMenuOpen: false,
       };
     });
   };
@@ -190,7 +199,32 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
   };
 
   closeAllMenus = () => {
-    this.setState({ isMenuOpen: false, isRagMenuOpen: false, openRagCollectionId: null });
+    this.setState({ isMenuOpen: false, isRagMenuOpen: false, openRagCollectionId: null, isLibraryMenuOpen: false });
+  };
+
+  openLibraryMenu = () => {
+    this.setState({ isLibraryMenuOpen: true, isRagMenuOpen: false, openRagCollectionId: null });
+  };
+
+  handleLibrarySelectAll = () => {
+    this.closeAllMenus();
+    if (this.props.onLibrarySelectProject) {
+      this.props.onLibrarySelectProject(null); // null = "All", also sets enabled: true
+    }
+  };
+
+  handleLibrarySelectProject = (project: LibraryProject) => {
+    this.closeAllMenus();
+    if (this.props.onLibrarySelectProject) {
+      this.props.onLibrarySelectProject(project); // also sets enabled: true
+    }
+  };
+
+  handleLibraryDisable = () => {
+    this.closeAllMenus();
+    if (this.props.onLibraryToggle && this.props.libraryScope?.enabled) {
+      this.props.onLibraryToggle();
+    }
   };
 
   handleRagClearSelection = () => {
@@ -313,6 +347,64 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
                           </span>
                         </div>
                       </button>
+                    )}
+                    <button
+                      className="menu-item menu-item-has-submenu"
+                      onClick={this.openLibraryMenu}
+                      disabled={isLoading || isLoadingHistory}
+                    >
+                      <LibraryIcon />
+                      <div className="menu-item-text">
+                        <span className="menu-item-title">Library</span>
+                        <span className="menu-item-subtext">
+                          {this.props.libraryScope?.enabled
+                            ? `Scope: ${this.props.libraryScope.project?.name || 'All'}`
+                            : 'Access your local Library'}
+                        </span>
+                      </div>
+                      <span className="menu-item-right">
+                        <ChevronRightIcon />
+                      </span>
+                    </button>
+
+                    {/* Library submenu */}
+                    {this.state.isLibraryMenuOpen && (
+                      <div className="dropdown-menu feature-menu menu-submenu" role="menu">
+                        <button className="menu-item" onClick={this.handleLibrarySelectAll} disabled={isLoading || isLoadingHistory}>
+                          <span className="menu-item-title">All</span>
+                          <span className="menu-item-right">
+                            {this.props.libraryScope?.enabled && !this.props.libraryScope?.project && (
+                              <span className="menu-item-check"><CheckIcon /></span>
+                            )}
+                          </span>
+                        </button>
+                        <div className="menu-divider" />
+                        {(this.props.libraryProjects || []).map((project) => {
+                          const isSelected = this.props.libraryScope?.enabled && this.props.libraryScope?.project?.slug === project.slug;
+                          return (
+                            <button
+                              key={project.slug}
+                              className="menu-item"
+                              onClick={() => this.handleLibrarySelectProject(project)}
+                              disabled={isLoading || isLoadingHistory}
+                              title={project.name}
+                            >
+                              <span className="menu-item-title">{project.name}</span>
+                              <span className="menu-item-right">
+                                {isSelected && <span className="menu-item-check"><CheckIcon /></span>}
+                              </span>
+                            </button>
+                          );
+                        })}
+                        {this.props.libraryScope?.enabled && (
+                          <>
+                            <div className="menu-divider" />
+                            <button className="menu-item" onClick={this.handleLibraryDisable} disabled={isLoading || isLoadingHistory}>
+                              <span className="menu-item-title">Disable Library</span>
+                            </button>
+                          </>
+                        )}
+                      </div>
                     )}
 
                     {/* RAG submenu */}
@@ -443,6 +535,20 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
                 {isStreaming ? <StopIcon /> : <SendIcon />}
               </button>
             </div>
+            {this.props.libraryScope?.enabled && (
+              <div className="library-scope-indicator" data-testid="library-scope-indicator">
+                <LibraryIcon />
+                <span>Library: {this.props.libraryScope.project?.name || 'All'}</span>
+                <button
+                  className="library-scope-close"
+                  onClick={this.handleLibraryDisable}
+                  title="Disable Library"
+                  type="button"
+                >
+                  &times;
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
