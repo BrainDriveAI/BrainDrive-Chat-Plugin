@@ -14,39 +14,13 @@ interface CodeBlockState {
   isCopied: boolean;
 }
 
-class EnhancedCodeBlock extends React.Component<EnhancedCodeBlockProps, CodeBlockState> {
-  private contentHash: string;
-
+class EnhancedCodeBlock extends React.PureComponent<EnhancedCodeBlockProps, CodeBlockState> {
   constructor(props: EnhancedCodeBlockProps) {
     super(props);
-    const lines = props.children.split('\n');
-    this.contentHash = this.generateContentHash(props.children);
     this.state = {
       isCollapsed: false, // Don't collapse by default
       isCopied: false
     };
-    console.log(`🔧 EnhancedCodeBlock created with hash: ${this.contentHash.substring(0, 8)}, ${lines.length} lines, collapsible: ${lines.length > 3}`);
-  }
-
-  componentDidMount() {
-    console.log(`🔧 EnhancedCodeBlock mounted, isCollapsed: ${this.state.isCollapsed}`);
-  }
-
-  componentDidUpdate(prevProps: EnhancedCodeBlockProps, prevState: CodeBlockState) {
-    if (prevState.isCollapsed !== this.state.isCollapsed) {
-      console.log(`🔧 EnhancedCodeBlock collapse state changed: ${prevState.isCollapsed} -> ${this.state.isCollapsed}`);
-    }
-  }
-
-  // Generate a simple hash for the content to help with debugging
-  private generateContentHash(content: string): string {
-    let hash = 0;
-    for (let i = 0; i < content.length; i++) {
-      const char = content.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash; // Convert to 32-bit integer
-    }
-    return Math.abs(hash).toString(16);
   }
 
   // Extract language from className (format: language-{lang})
@@ -92,16 +66,12 @@ class EnhancedCodeBlock extends React.Component<EnhancedCodeBlockProps, CodeBloc
    * Toggle collapse/expand
    */
   toggleCollapse = () => {
-    console.log(`🔧 EnhancedCodeBlock toggleCollapse called, current state: ${this.state.isCollapsed}`);
     this.setState(prevState => {
-      const newState = !prevState.isCollapsed;
-      console.log(`🔧 EnhancedCodeBlock setting isCollapsed to: ${newState}`);
-      return { isCollapsed: newState };
+      return { isCollapsed: !prevState.isCollapsed };
     });
   };
 
   render() {
-    const { className } = this.props;
     const { isCollapsed, isCopied } = this.state;
 
     return (

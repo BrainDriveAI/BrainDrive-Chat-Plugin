@@ -53,6 +53,110 @@ interface ChatHistoryState {
   expandedRetrievedContext: Set<string>;
 }
 
+interface MessageItemProps {
+  message: ChatMessage;
+  renderMessage: (message: ChatMessage) => React.ReactNode;
+  isEditing: boolean;
+  editingContent: string;
+  isSearchExpanded: boolean;
+  isDocumentExpanded: boolean;
+  isRetrievedExpanded: boolean;
+}
+
+interface MarkdownMessageContentProps {
+  messageId: string;
+  content: string;
+}
+
+const MessageItem = React.memo<MessageItemProps>(
+  ({ message, renderMessage }) => <>{renderMessage(message)}</>,
+  (prevProps, nextProps) => {
+    return (
+      prevProps.message === nextProps.message &&
+      prevProps.renderMessage === nextProps.renderMessage &&
+      prevProps.isEditing === nextProps.isEditing &&
+      prevProps.editingContent === nextProps.editingContent &&
+      prevProps.isSearchExpanded === nextProps.isSearchExpanded &&
+      prevProps.isDocumentExpanded === nextProps.isDocumentExpanded &&
+      prevProps.isRetrievedExpanded === nextProps.isRetrievedExpanded
+    );
+  }
+);
+
+MessageItem.displayName = 'MessageItem';
+
+const MarkdownMessageContent = React.memo<MarkdownMessageContentProps>(
+  ({ messageId, content }) => {
+    let codeBlockIndex = 0;
+
+    return (
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          a: ({ node, ...props }) => (
+            <a
+              {...props}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="markdown-link"
+              style={{ color: 'inherit' }}
+            />
+          ),
+          code: ({ node, inline, className, children, ...props }: any) => {
+            const match = /language-(\w+)/.exec(className || '');
+            const codeContent = String(children).replace(/\n$/, '');
+
+            if (!inline && (codeContent.includes('\n') || className)) {
+              const blockIndex = codeBlockIndex++;
+              const codeBlockKey = `${messageId}-code-${blockIndex}`;
+
+              return (
+                <EnhancedCodeBlock
+                  key={codeBlockKey}
+                  className={className}
+                  language={match?.[1]}
+                >
+                  {codeContent}
+                </EnhancedCodeBlock>
+              );
+            }
+
+            return (
+              <code className="markdown-inline-code" {...props}>
+                {codeContent}
+              </code>
+            );
+          },
+          blockquote: ({ node, ...props }) => (
+            <blockquote className="markdown-blockquote" {...props} />
+          ),
+          table: ({ node, ...props }) => (
+            <div className="markdown-table-wrapper">
+              <table className="markdown-table" {...props} />
+            </div>
+          ),
+          th: ({ node, ...props }) => (
+            <th className="markdown-table-header" {...props} />
+          ),
+          td: ({ node, ...props }) => (
+            <td className="markdown-table-cell" {...props} />
+          ),
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    );
+  },
+  (prevProps, nextProps) => {
+    return (
+      prevProps.messageId === nextProps.messageId &&
+      prevProps.content === nextProps.content
+    );
+  }
+);
+
+MarkdownMessageContent.displayName = 'MarkdownMessageContent';
+
 class ChatHistory extends React.Component<ChatHistoryProps, ChatHistoryState> {
   constructor(props: ChatHistoryProps) {
     super(props);
@@ -61,6 +165,31 @@ class ChatHistory extends React.Component<ChatHistoryProps, ChatHistoryState> {
       expandedDocumentContext: new Set(),
       expandedRetrievedContext: new Set(),
     };
+  }
+
+  shouldComponentUpdate(nextProps: ChatHistoryProps, nextState: ChatHistoryState) {
+    if (nextState !== this.state) return true;
+
+    if (nextProps.messages !== this.props.messages) return true;
+    if (nextProps.isLoading !== this.props.isLoading) return true;
+    if (nextProps.isLoadingHistory !== this.props.isLoadingHistory) return true;
+    if (nextProps.error !== this.props.error) return true;
+    if (nextProps.chatHistoryRef !== this.props.chatHistoryRef) return true;
+    if (nextProps.editingMessageId !== this.props.editingMessageId) return true;
+    if (nextProps.editingContent !== this.props.editingContent) return true;
+    if (nextProps.onStartEditing !== this.props.onStartEditing) return true;
+    if (nextProps.onCancelEditing !== this.props.onCancelEditing) return true;
+    if (nextProps.onSaveEditing !== this.props.onSaveEditing) return true;
+    if (nextProps.onEditingContentChange !== this.props.onEditingContentChange) return true;
+    if (nextProps.onRegenerateResponse !== this.props.onRegenerateResponse) return true;
+    if (nextProps.onContinueGeneration !== this.props.onContinueGeneration) return true;
+    if (nextProps.showScrollToBottom !== this.props.showScrollToBottom) return true;
+    if (nextProps.onScrollToBottom !== this.props.onScrollToBottom) return true;
+    if (nextProps.onToggleMarkdown !== this.props.onToggleMarkdown) return true;
+    if (nextProps.onScroll !== this.props.onScroll) return true;
+    if (nextProps.onUserScrollIntent !== this.props.onUserScrollIntent) return true;
+
+    return false;
   }
 
   private renderRetrievedContextBlock = (messageId: string, retrievalData: NonNullable<ChatMessage['retrievalData']>) => {
@@ -455,59 +584,10 @@ class ChatHistory extends React.Component<ChatHistoryProps, ChatHistoryState> {
       );
     } else {
       mainContent = (
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          components={{
-            a: ({ node, ...props }) => (
-              <a
-                {...props}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="markdown-link"
-                style={{ color: 'inherit' }}
-              />
-            ),
-            code: ({ node, inline, className, children, ...props }: any) => {
-              const match = /language-(\w+)/.exec(className || '');
-              const codeContent = String(children).replace(/\n$/, '');
-
-              if (!inline && (codeContent.includes('\n') || className)) {
-                const codeBlockKey = `${message.id}-${codeContent.slice(0, 50).replace(/\s/g, '')}-${codeContent.length}`;
-                return (
-                  <EnhancedCodeBlock
-                    key={codeBlockKey}
-                    className={className}
-                    language={match?.[1]}
-                  >
-                    {codeContent}
-                  </EnhancedCodeBlock>
-                );
-              }
-
-              return (
-                <code className="markdown-inline-code" {...props}>
-                  {codeContent}
-                </code>
-              );
-            },
-            blockquote: ({ node, ...props }) => (
-              <blockquote className="markdown-blockquote" {...props} />
-            ),
-            table: ({ node, ...props }) => (
-              <div className="markdown-table-wrapper">
-                <table className="markdown-table" {...props} />
-              </div>
-            ),
-            th: ({ node, ...props }) => (
-              <th className="markdown-table-header" {...props} />
-            ),
-            td: ({ node, ...props }) => (
-              <td className="markdown-table-cell" {...props} />
-            ),
-          }}
-        >
-          {displayContent}
-        </ReactMarkdown>
+        <MarkdownMessageContent
+          messageId={message.id}
+          content={displayContent}
+        />
       );
     }
 
@@ -689,7 +769,18 @@ class ChatHistory extends React.Component<ChatHistoryProps, ChatHistoryState> {
           {!isLoadingHistory && messages.length === 0 ? (
             this.renderEmptyState()
           ) : (
-            messages.map(message => this.renderMessage(message))
+            messages.map(message => (
+              <MessageItem
+                key={message.id}
+                message={message}
+                renderMessage={this.renderMessage}
+                isEditing={this.props.editingMessageId === message.id}
+                editingContent={this.props.editingMessageId === message.id ? this.props.editingContent : ''}
+                isSearchExpanded={this.state.expandedSearchResults.has(message.id)}
+                isDocumentExpanded={this.state.expandedDocumentContext.has(message.id)}
+                isRetrievedExpanded={this.state.expandedRetrievedContext.has(message.id)}
+              />
+            ))
           )}
         </div>
         
