@@ -101,7 +101,7 @@ class BrainDriveChatLifecycleManager(BaseLifecycleManager):
         self.plugin_data = {
             "name": "BrainDriveChat",
             "description": "Comprehensive AI chat interface with model selection and conversation history",
-            "version": "1.0.27",
+            "version": "1.0.28",
             "type": "frontend",
             "icon": "MessageSquare",
             "category": "ai",
