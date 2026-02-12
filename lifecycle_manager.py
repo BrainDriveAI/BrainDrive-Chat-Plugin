@@ -168,6 +168,56 @@ class BrainDriveChatLifecycleManager(BaseLifecycleManager):
                         "type": "boolean",
                         "description": "Show conversation history panel",
                         "default": True
+                    },
+                    "conversation_type": {
+                        "type": "text",
+                        "description": "Conversation type namespace used to isolate conversation history",
+                        "default": "chat"
+                    },
+                    "default_library_scope_enabled": {
+                        "type": "boolean",
+                        "description": "Enable Library scope by default for new chats on this page",
+                        "default": False
+                    },
+                    "default_project_slug": {
+                        "type": "text",
+                        "description": "Default Library project slug for focused pages",
+                        "default": None
+                    },
+                    "default_project_lifecycle": {
+                        "type": "text",
+                        "description": "Lifecycle used when resolving default project slug",
+                        "default": "active"
+                    },
+                    "default_persona_id": {
+                        "type": "text",
+                        "description": "Default persona ID for new chats on this page",
+                        "default": None
+                    },
+                    "default_model_key": {
+                        "type": "text",
+                        "description": "Default model key in <provider>::<serverId>::<modelName> format",
+                        "default": None
+                    },
+                    "apply_defaults_on_new_chat": {
+                        "type": "boolean",
+                        "description": "Re-apply configured defaults when starting a new chat",
+                        "default": True
+                    },
+                    "lock_project_scope": {
+                        "type": "boolean",
+                        "description": "Prevent changing Library project scope on focused pages",
+                        "default": False
+                    },
+                    "lock_persona_selection": {
+                        "type": "boolean",
+                        "description": "Prevent changing persona selection on focused pages",
+                        "default": False
+                    },
+                    "lock_model_selection": {
+                        "type": "boolean",
+                        "description": "Prevent changing model selection on focused pages",
+                        "default": False
                     }
                 },
                 "messages": {},

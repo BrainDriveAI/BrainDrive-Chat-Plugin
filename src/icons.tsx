@@ -139,6 +139,12 @@ export const LibraryIcon = () => (
   </svg>
 );
 
+export const PageAddIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-1 10h-4v4h-2v-4H8v-2h4V7h2v4h4v2z"/>
+  </svg>
+);
+
 export const DatabaseIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
     <path d="M2 20h20v-4H2v4zm0-18v4h20V2H2zm0 10h20V8H2v4z" />

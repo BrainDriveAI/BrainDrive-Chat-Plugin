@@ -13,12 +13,14 @@ interface ChatHeaderProps {
   isLoadingModels: boolean;
   onModelChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
   showModelSelection: boolean;
+  lockModelSelection?: boolean;
   
   // Persona selection props
   personas: PersonaInfo[];
   selectedPersona: PersonaInfo | null;
   onPersonaChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
   showPersonaSelection: boolean;
+  lockPersonaSelection?: boolean;
   
   // Conversation history props
   conversations: ConversationInfo[];
@@ -77,7 +79,11 @@ class ChatHeader extends React.Component<ChatHeaderProps, ChatHeaderState> {
   }
 
   private handleModelSelect = (value: string) => {
-    const { onModelChange } = this.props;
+    const { onModelChange, lockModelSelection } = this.props;
+    if (lockModelSelection) {
+      return;
+    }
+
     if (!onModelChange) {
       return;
     }
@@ -86,7 +92,11 @@ class ChatHeader extends React.Component<ChatHeaderProps, ChatHeaderState> {
   };
 
   private handlePersonaSelect = (value: string) => {
-    const { onPersonaChange } = this.props;
+    const { onPersonaChange, lockPersonaSelection } = this.props;
+    if (lockPersonaSelection) {
+      return;
+    }
+
     if (!onPersonaChange) {
       return;
     }
@@ -114,10 +124,12 @@ class ChatHeader extends React.Component<ChatHeaderProps, ChatHeaderState> {
       isLoadingModels,
       onModelChange,
       showModelSelection,
+      lockModelSelection,
       personas,
       selectedPersona,
       onPersonaChange,
       showPersonaSelection,
+      lockPersonaSelection,
       conversations,
       selectedConversation,
       onConversationSelect,
@@ -184,7 +196,7 @@ class ChatHeader extends React.Component<ChatHeaderProps, ChatHeaderState> {
                 placeholder={models.length === 0 ? 'No models available' : 'Select model'}
                 searchPlaceholder="Search models"
                 noResultsText="No models found"
-                disabled={models.length === 0}
+                disabled={models.length === 0 || isLoading || isLoadingHistory || !!lockModelSelection}
                 loading={isLoadingModels}
                 triggerClassName="header-select"
               />
@@ -203,7 +215,7 @@ class ChatHeader extends React.Component<ChatHeaderProps, ChatHeaderState> {
                 placeholder="No Persona"
                 searchPlaceholder="Search personas"
                 noResultsText="No personas found"
-                disabled={this.props.isLoading || this.props.isLoadingHistory}
+                disabled={this.props.isLoading || this.props.isLoadingHistory || !!lockPersonaSelection}
                 triggerClassName="header-select"
               />
             </div>

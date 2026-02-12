@@ -150,6 +150,15 @@
     max-width: 95%;
   }
 
+  .approval-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .approval-args-editor {
+    min-height: 110px;
+  }
+
   .message-actions {
     flex-direction: column;
     align-items: flex-start;

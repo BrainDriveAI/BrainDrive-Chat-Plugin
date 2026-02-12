@@ -1,7 +1,7 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ChatMessage, SearchResult } from '../types';
+import { ChatMessage, SearchResult, MCPApprovalRequest } from '../types';
 import { formatTimestamp } from '../utils';
 import EnhancedCodeBlock from './EnhancedCodeBlock';
 import ThinkingBlock from './ThinkingBlock';
@@ -45,12 +45,19 @@ interface ChatHistoryProps {
   onToggleMarkdown?: (messageId: string) => void;
   onScroll?: (event: React.UIEvent<HTMLDivElement>) => void;
   onUserScrollIntent?: (source: ScrollIntentSource) => void;
+  onApprovalDecision?: (
+    request: MCPApprovalRequest,
+    action: 'approve' | 'reject',
+    editedArguments?: Record<string, any>
+  ) => void;
 }
 
 interface ChatHistoryState {
   expandedSearchResults: Set<string>;
   expandedDocumentContext: Set<string>;
   expandedRetrievedContext: Set<string>;
+  approvalDraftByMessage: Record<string, string>;
+  approvalDraftErrorByMessage: Record<string, string | null>;
 }
 
 interface MessageItemProps {
@@ -61,6 +68,8 @@ interface MessageItemProps {
   isSearchExpanded: boolean;
   isDocumentExpanded: boolean;
   isRetrievedExpanded: boolean;
+  approvalDraftValue?: string;
+  approvalDraftError?: string | null;
 }
 
 interface MarkdownMessageContentProps {
@@ -78,7 +87,9 @@ const MessageItem = React.memo<MessageItemProps>(
       prevProps.editingContent === nextProps.editingContent &&
       prevProps.isSearchExpanded === nextProps.isSearchExpanded &&
       prevProps.isDocumentExpanded === nextProps.isDocumentExpanded &&
-      prevProps.isRetrievedExpanded === nextProps.isRetrievedExpanded
+      prevProps.isRetrievedExpanded === nextProps.isRetrievedExpanded &&
+      prevProps.approvalDraftValue === nextProps.approvalDraftValue &&
+      prevProps.approvalDraftError === nextProps.approvalDraftError
     );
   }
 );
@@ -164,6 +175,8 @@ class ChatHistory extends React.Component<ChatHistoryProps, ChatHistoryState> {
       expandedSearchResults: new Set(),
       expandedDocumentContext: new Set(),
       expandedRetrievedContext: new Set(),
+      approvalDraftByMessage: {},
+      approvalDraftErrorByMessage: {},
     };
   }
 
@@ -188,6 +201,7 @@ class ChatHistory extends React.Component<ChatHistoryProps, ChatHistoryState> {
     if (nextProps.onToggleMarkdown !== this.props.onToggleMarkdown) return true;
     if (nextProps.onScroll !== this.props.onScroll) return true;
     if (nextProps.onUserScrollIntent !== this.props.onUserScrollIntent) return true;
+    if (nextProps.onApprovalDecision !== this.props.onApprovalDecision) return true;
 
     return false;
   }
@@ -309,6 +323,83 @@ class ChatHistory extends React.Component<ChatHistoryProps, ChatHistoryState> {
       }
       return { expandedRetrievedContext: newSet };
     });
+  };
+
+  private formatApprovalArguments = (argumentsValue: unknown): string => {
+    if (!argumentsValue || typeof argumentsValue !== 'object' || Array.isArray(argumentsValue)) {
+      return '{}';
+    }
+    try {
+      return JSON.stringify(argumentsValue, null, 2) || '{}';
+    } catch (_error) {
+      return '{}';
+    }
+  };
+
+  private getApprovalDraftValue = (messageId: string, approval: MCPApprovalRequest): string => {
+    const existing = this.state.approvalDraftByMessage[messageId];
+    if (typeof existing === 'string') {
+      return existing;
+    }
+    return this.formatApprovalArguments(approval.arguments);
+  };
+
+  private updateApprovalDraft = (messageId: string, value: string) => {
+    this.setState((prevState) => ({
+      approvalDraftByMessage: {
+        ...prevState.approvalDraftByMessage,
+        [messageId]: value,
+      },
+      approvalDraftErrorByMessage: {
+        ...prevState.approvalDraftErrorByMessage,
+        [messageId]: null,
+      },
+    }));
+  };
+
+  private resetApprovalDraft = (messageId: string, approval: MCPApprovalRequest) => {
+    const defaultValue = this.formatApprovalArguments(approval.arguments);
+    this.setState((prevState) => ({
+      approvalDraftByMessage: {
+        ...prevState.approvalDraftByMessage,
+        [messageId]: defaultValue,
+      },
+      approvalDraftErrorByMessage: {
+        ...prevState.approvalDraftErrorByMessage,
+        [messageId]: null,
+      },
+    }));
+  };
+
+  private setApprovalDraftError = (messageId: string, errorText: string | null) => {
+    this.setState((prevState) => ({
+      approvalDraftErrorByMessage: {
+        ...prevState.approvalDraftErrorByMessage,
+        [messageId]: errorText,
+      },
+    }));
+  };
+
+  private handleApproveWithEditedArguments = (messageId: string, approval: MCPApprovalRequest) => {
+    const draftText = this.getApprovalDraftValue(messageId, approval).trim();
+    let parsedArgs: unknown = {};
+
+    if (draftText) {
+      try {
+        parsedArgs = JSON.parse(draftText);
+      } catch (_error) {
+        this.setApprovalDraftError(messageId, 'Arguments must be valid JSON.');
+        return;
+      }
+    }
+
+    if (!parsedArgs || typeof parsedArgs !== 'object' || Array.isArray(parsedArgs)) {
+      this.setApprovalDraftError(messageId, 'Arguments must be a JSON object.');
+      return;
+    }
+
+    this.setApprovalDraftError(messageId, null);
+    this.props.onApprovalDecision?.(approval, 'approve', parsedArgs as Record<string, any>);
   };
 
   /**
@@ -483,6 +574,94 @@ class ChatHistory extends React.Component<ChatHistoryProps, ChatHistoryState> {
   };
 
   /**
+   * Render MCP approval request card
+   */
+  renderApprovalRequestMessage = (message: ChatMessage) => {
+    const approval = message.approvalData;
+    if (!approval) return null;
+
+    const status = approval.status || 'pending';
+    const canAct = status === 'pending' && !this.props.isLoading;
+    const formattedArgs = this.formatApprovalArguments(approval.arguments);
+    const draftArgs = this.getApprovalDraftValue(message.id, approval);
+    const draftError = this.state.approvalDraftErrorByMessage[message.id];
+
+    return (
+      <div key={message.id} className="message message-ai message-approval-request">
+        <div className="message-bubble">
+          <div className="message-body">
+            <div className="approval-card">
+              <div className="approval-header">
+                <span className={`approval-status approval-status-${status}`}>{status.toUpperCase()}</span>
+                <span className="approval-tool">{approval.tool}</span>
+              </div>
+              {approval.summary && (
+                <div className="approval-summary">{approval.summary}</div>
+              )}
+              <div className="approval-args-label">Arguments</div>
+              {status === 'pending' ? (
+                <>
+                  <textarea
+                    className="approval-args-editor"
+                    value={draftArgs}
+                    onChange={(event) => this.updateApprovalDraft(message.id, event.target.value)}
+                    spellCheck={false}
+                    rows={Math.max(4, Math.min(14, draftArgs.split('\n').length + 1))}
+                  />
+                  <div className="approval-edit-actions">
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => this.resetApprovalDraft(message.id, approval)}
+                      disabled={!canAct}
+                    >
+                      Use Original
+                    </button>
+                  </div>
+                  {draftError && (
+                    <div className="approval-args-error">{draftError}</div>
+                  )}
+                </>
+              ) : (
+                <pre className="approval-args">{formattedArgs}</pre>
+              )}
+              {approval.diff_preview && (
+                <>
+                  <div className="approval-args-label">Diff Preview</div>
+                  <pre className="approval-diff">{approval.diff_preview}</pre>
+                </>
+              )}
+              {status === 'pending' && (
+                <div className="approval-actions">
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => this.handleApproveWithEditedArguments(message.id, approval)}
+                    disabled={!canAct}
+                  >
+                    Approve
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => this.props.onApprovalDecision?.(approval, 'reject')}
+                    disabled={!canAct}
+                  >
+                    Reject
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="message-meta">
+            <span className="message-timestamp">{formatTimestamp(message.timestamp)}</span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  /**
    * Render a chat message
    */
   renderMessage = (message: ChatMessage) => {
@@ -499,6 +678,11 @@ class ChatHistory extends React.Component<ChatHistoryProps, ChatHistoryState> {
     // Handle retrieved context messages separately
     if (message.isRetrievedContext) {
       return this.renderRetrievedContextMessage(message);
+    }
+
+    // Handle MCP approval messages separately
+    if (message.isApprovalRequest) {
+      return this.renderApprovalRequestMessage(message);
     }
 
     // Handle thinking tags in content
@@ -779,6 +963,8 @@ class ChatHistory extends React.Component<ChatHistoryProps, ChatHistoryState> {
                 isSearchExpanded={this.state.expandedSearchResults.has(message.id)}
                 isDocumentExpanded={this.state.expandedDocumentContext.has(message.id)}
                 isRetrievedExpanded={this.state.expandedRetrievedContext.has(message.id)}
+                approvalDraftValue={this.state.approvalDraftByMessage[message.id]}
+                approvalDraftError={this.state.approvalDraftErrorByMessage[message.id]}
               />
             ))
           )}

@@ -448,6 +448,117 @@
   border-radius: 0.375rem;
 }
 
+/* MCP Approval Request Message Styles */
+.message-approval-request .message-bubble {
+  background-color: rgba(255, 152, 0, 0.08);
+  border-color: rgba(255, 152, 0, 0.28);
+}
+
+.approval-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.approval-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.approval-status {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border-radius: 0.25rem;
+  padding: 0.2rem 0.45rem;
+}
+
+.approval-status-pending {
+  background-color: rgba(255, 152, 0, 0.16);
+  color: #7a3f00;
+}
+
+.approval-status-approved {
+  background-color: rgba(76, 175, 80, 0.16);
+  color: #1e6a21;
+}
+
+.approval-status-rejected {
+  background-color: rgba(244, 67, 54, 0.16);
+  color: #8a1d1d;
+}
+
+.approval-tool {
+  font-family: monospace;
+  font-size: 0.82rem;
+  opacity: 0.9;
+}
+
+.approval-summary {
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.approval-args-label {
+  font-size: 0.74rem;
+  font-weight: 600;
+  opacity: 0.75;
+}
+
+.approval-args,
+.approval-diff {
+  margin: 0;
+  padding: 0.65rem;
+  border-radius: 0.45rem;
+  border: 1px solid var(--border-color);
+  background-color: var(--paper-bg);
+  font-family: monospace;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.approval-args-editor {
+  width: 100%;
+  min-height: 130px;
+  border: 1px solid var(--border-color);
+  border-radius: 0.45rem;
+  background-color: var(--paper-bg);
+  color: var(--text-color);
+  font-family: monospace;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  padding: 0.65rem;
+  resize: vertical;
+}
+
+.approval-args-editor:focus {
+  outline: none;
+  border-color: var(--button-primary-bg);
+  box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.1);
+}
+
+.approval-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.approval-args-error {
+  font-size: 0.78rem;
+  color: var(--status-error-color);
+}
+
+.approval-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
 /* Retrieved Context (RAG) Message Styles */
 .message-retrieved-context .message-bubble {
   background-color: rgba(156, 39, 176, 0.05);

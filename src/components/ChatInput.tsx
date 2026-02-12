@@ -1,6 +1,6 @@
 import React from 'react';
 import { ModelInfo, RagCollection, LibraryProject, LibraryScope } from '../types';
-import { CheckIcon, ChevronRightIcon, DatabaseIcon, LibraryIcon, PersonaIcon, PlusIcon, SearchIcon, SendIcon, StopIcon, UploadIcon } from '../icons';
+import { CheckIcon, ChevronRightIcon, DatabaseIcon, LibraryIcon, PageAddIcon, PersonaIcon, PlusIcon, SearchIcon, SendIcon, StopIcon, UploadIcon } from '../icons';
 
 interface ChatInputProps {
   inputText: string;
@@ -37,12 +37,15 @@ interface ChatInputProps {
   onPersonaChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
   onPersonaToggle?: () => void;
   showPersonaSelection: boolean;
+  lockPersonaSelection?: boolean;
 
   // Library props
   libraryScope?: LibraryScope;
   libraryProjects?: LibraryProject[];
   onLibraryToggle?: () => void;
   onLibrarySelectProject?: (project: LibraryProject | null) => void;
+  onOpenCreateLibraryPage?: () => void;
+  lockProjectScope?: boolean;
 }
 
 interface ChatInputState {
@@ -165,6 +168,11 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
   };
 
   handlePersonaToggle = () => {
+    if (this.props.lockPersonaSelection) {
+      this.closeAllMenus();
+      return;
+    }
+
     this.setState(prevState => {
       const newShowPersonaSelector = !prevState.showPersonaSelector;
       
@@ -183,6 +191,14 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
         isLibraryMenuOpen: false,
       };
     });
+  };
+
+  handlePersonaChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    if (this.props.lockPersonaSelection) {
+      return;
+    }
+
+    this.props.onPersonaChange(event);
   };
 
   openRagMenu = () => {
@@ -207,6 +223,10 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
   };
 
   handleLibrarySelectAll = () => {
+    if (this.props.lockProjectScope) {
+      this.closeAllMenus();
+      return;
+    }
     this.closeAllMenus();
     if (this.props.onLibrarySelectProject) {
       this.props.onLibrarySelectProject(null); // null = "All", also sets enabled: true
@@ -214,6 +234,10 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
   };
 
   handleLibrarySelectProject = (project: LibraryProject) => {
+    if (this.props.lockProjectScope) {
+      this.closeAllMenus();
+      return;
+    }
     this.closeAllMenus();
     if (this.props.onLibrarySelectProject) {
       this.props.onLibrarySelectProject(project); // also sets enabled: true
@@ -221,9 +245,20 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
   };
 
   handleLibraryDisable = () => {
+    if (this.props.lockProjectScope) {
+      this.closeAllMenus();
+      return;
+    }
     this.closeAllMenus();
     if (this.props.onLibraryToggle && this.props.libraryScope?.enabled) {
       this.props.onLibraryToggle();
+    }
+  };
+
+  handleOpenCreateLibraryPage = () => {
+    this.closeAllMenus();
+    if (this.props.onOpenCreateLibraryPage) {
+      this.props.onOpenCreateLibraryPage();
     }
   };
 
@@ -270,7 +305,9 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
       personas,
       selectedPersona,
       onPersonaChange,
-      showPersonaSelection
+      showPersonaSelection,
+      lockPersonaSelection,
+      lockProjectScope
     } = this.props;
 
     // Local dropdown state retained for future menu use; not used in current layout
@@ -338,7 +375,7 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
                       </div>
                     </button>
                     {showPersonaSelection && (
-                      <button className="menu-item" onClick={this.handlePersonaToggle} disabled={isLoading || isLoadingHistory}>
+                      <button className="menu-item" onClick={this.handlePersonaToggle} disabled={isLoading || isLoadingHistory || !!lockPersonaSelection}>
                         <PersonaIcon />
                         <div className="menu-item-text">
                           <span className="menu-item-title">Personas</span>
@@ -370,7 +407,15 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
                     {/* Library submenu */}
                     {this.state.isLibraryMenuOpen && (
                       <div className="dropdown-menu feature-menu menu-submenu" role="menu">
-                        <button className="menu-item" onClick={this.handleLibrarySelectAll} disabled={isLoading || isLoadingHistory}>
+                        <button className="menu-item" onClick={this.handleOpenCreateLibraryPage} disabled={isLoading || isLoadingHistory}>
+                          <PageAddIcon />
+                          <div className="menu-item-text">
+                            <span className="menu-item-title">Create Library Page...</span>
+                            <span className="menu-item-subtext">Build a page with chat defaults</span>
+                          </div>
+                        </button>
+                        <div className="menu-divider" />
+                        <button className="menu-item" onClick={this.handleLibrarySelectAll} disabled={isLoading || isLoadingHistory || !!lockProjectScope}>
                           <span className="menu-item-title">All</span>
                           <span className="menu-item-right">
                             {this.props.libraryScope?.enabled && !this.props.libraryScope?.project && (
@@ -386,7 +431,7 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
                               key={project.slug}
                               className="menu-item"
                               onClick={() => this.handleLibrarySelectProject(project)}
-                              disabled={isLoading || isLoadingHistory}
+                              disabled={isLoading || isLoadingHistory || !!lockProjectScope}
                               title={project.name}
                             >
                               <span className="menu-item-title">{project.name}</span>
@@ -399,7 +444,7 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
                         {this.props.libraryScope?.enabled && (
                           <>
                             <div className="menu-divider" />
-                            <button className="menu-item" onClick={this.handleLibraryDisable} disabled={isLoading || isLoadingHistory}>
+                            <button className="menu-item" onClick={this.handleLibraryDisable} disabled={isLoading || isLoadingHistory || !!lockProjectScope}>
                               <span className="menu-item-title">Disable Library</span>
                             </button>
                           </>
@@ -495,9 +540,9 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
               {showPersonaSelection && (
                 <select
                   value={selectedPersona?.id || ''}
-                  onChange={onPersonaChange}
+                  onChange={this.handlePersonaChange}
                   className="persona-selector"
-                  disabled={isLoading || isLoadingHistory}
+                  disabled={isLoading || isLoadingHistory || !!lockPersonaSelection}
                   title="Select persona"
                 >
                   <option value="">No Persona</option>
@@ -542,8 +587,9 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
                 <button
                   className="library-scope-close"
                   onClick={this.handleLibraryDisable}
-                  title="Disable Library"
+                  title={lockProjectScope ? 'Library scope is locked for this page' : 'Disable Library'}
                   type="button"
+                  disabled={!!lockProjectScope}
                 >
                   &times;
                 </button>

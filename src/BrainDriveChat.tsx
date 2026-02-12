@@ -12,7 +12,11 @@ import {
   RagCollection,
   RagCreateCollectionInput,
   LibraryProject,
-  LibraryScope
+  LibraryScope,
+  MCPApprovalDecision,
+  MCPApprovalRequest,
+  MCPRequestParams,
+  MCPProjectSource
 } from './types';
 import {
   generateId
@@ -35,12 +39,14 @@ import {
   ChatHistory,
   ChatInput,
   LoadingStates,
+  CreateLibraryPageModal,
   CreateRagCollectionModal,
   ManageRagDocumentsModal
 } from './components';
+import type { LibraryPageModalValues } from './components/CreateLibraryPageModal';
 
 // Import services
-import { AIService, SearchService, DocumentService, RagService, LibraryService } from './services';
+import { AIService, SearchService, DocumentService, RagService, LibraryService, LibraryPageService } from './services';
 
 // Import icons
 // Icons previously used in the bottom history panel are no longer needed here
@@ -68,6 +74,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   private documentService: DocumentService | null = null;
   private ragService: RagService | null = null;
   private libraryService: LibraryService | null = null;
+  private libraryPageService: LibraryPageService | null = null;
   private libraryProjects: LibraryProject[] = [];
   private currentStreamingAbortController: AbortController | null = null;
   private menuButtonRef: HTMLButtonElement | null = null;
@@ -77,6 +84,8 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   private readonly NEAR_BOTTOM_EPSILON = 24;
   private readonly STRICT_BOTTOM_THRESHOLD = 4;
   private readonly USER_SCROLL_INTENT_GRACE_MS = 300;
+  private readonly PROJECT_AUTO_SELECT_CONFIDENCE = 0.85;
+  private currentMcpProjectSource: MCPProjectSource = 'ui';
   private isProgrammaticScroll = false;
   private pendingAutoScrollTimeout: ReturnType<typeof setTimeout> | null = null;
   private lastUserScrollTs = 0;
@@ -155,6 +164,9 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       isCreateRagCollectionModalOpen: false,
       isManageRagDocumentsModalOpen: false,
       manageRagDocumentsCollectionId: null,
+      isCreateLibraryPageModalOpen: false,
+      isCreateLibraryPageSubmitting: false,
+      createLibraryPageModalError: null,
 
       // Library state
       libraryScope: { enabled: false, project: null },
@@ -202,6 +214,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
 
     // Initialize Library service
     this.libraryService = new LibraryService(props.services.api);
+    this.libraryPageService = new LibraryPageService(props.services.api);
   }
 
   /**
@@ -478,6 +491,166 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     this.setState({ selectedRagCollectionId: collectionId });
   };
 
+  openCreateLibraryPageModal = (): void => {
+    this.setState({
+      isCreateLibraryPageModalOpen: true,
+      createLibraryPageModalError: null,
+    });
+  };
+
+  closeCreateLibraryPageModal = (): void => {
+    if (this.state.isCreateLibraryPageSubmitting) {
+      return;
+    }
+    this.setState({
+      isCreateLibraryPageModalOpen: false,
+      createLibraryPageModalError: null,
+    });
+  };
+
+  private getPluginInstanceId(): string | null {
+    const instanceId = typeof this.props.instanceId === 'string'
+      ? this.props.instanceId.trim()
+      : '';
+    const pluginId = typeof this.props.id === 'string'
+      ? this.props.id.trim()
+      : '';
+    return instanceId || pluginId || null;
+  }
+
+  private triggerSidebarRefreshHooks(): { didRefreshPages: boolean; didRefreshSidebar: boolean } {
+    if (typeof window === 'undefined') {
+      return { didRefreshPages: false, didRefreshSidebar: false };
+    }
+
+    const globalWindow = window as Window & {
+      refreshPages?: () => void;
+      refreshSidebar?: () => void;
+    };
+
+    let didRefreshPages = false;
+    let didRefreshSidebar = false;
+
+    if (typeof globalWindow.refreshPages === 'function') {
+      try {
+        globalWindow.refreshPages();
+        didRefreshPages = true;
+      } catch (error) {
+        console.warn('refreshPages hook failed:', error);
+      }
+    }
+
+    if (typeof globalWindow.refreshSidebar === 'function') {
+      try {
+        globalWindow.refreshSidebar();
+        didRefreshSidebar = true;
+      } catch (error) {
+        console.warn('refreshSidebar hook failed:', error);
+      }
+    }
+
+    return { didRefreshPages, didRefreshSidebar };
+  }
+
+  private navigateToPageRoute(route: string): void {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const normalizedRoute = String(route || '').replace(/^\/+/, '');
+    if (!normalizedRoute) {
+      return;
+    }
+
+    try {
+      window.location.assign(`/pages/${encodeURI(normalizedRoute)}`);
+    } catch (error) {
+      console.warn('Failed to navigate to created page:', error);
+    }
+  }
+
+  handleCreateLibraryPageSubmit = async (values: LibraryPageModalValues): Promise<void> => {
+    if (this.state.isCreateLibraryPageSubmitting) {
+      return;
+    }
+
+    this.setState({
+      isCreateLibraryPageSubmitting: true,
+      createLibraryPageModalError: null,
+    });
+
+    try {
+      if (!this.libraryPageService) {
+        throw new Error('Library page creation service is not available');
+      }
+
+      const pageContext = this.getCurrentPageContext();
+      const createResult = await this.libraryPageService.createLibraryPage(values, {
+        pageId: pageContext?.pageId || null,
+        pluginInstanceId: this.getPluginInstanceId(),
+        moduleId: this.props.moduleId || null,
+      });
+
+      let publishError: string | null = null;
+      if (values.publishImmediately) {
+        try {
+          await this.libraryPageService.publishPage(createResult.pageId, true);
+        } catch (error) {
+          publishError = error instanceof Error ? error.message : 'Unknown publish error';
+        }
+      }
+
+      const refreshState = this.triggerSidebarRefreshHooks();
+      const hooksUnavailable = !refreshState.didRefreshPages && !refreshState.didRefreshSidebar;
+      const routePath = `/pages/${createResult.route}`;
+      const routeAdjustNotice = createResult.isRouteAdjusted
+        ? ' Route slug was adjusted to avoid a collision.'
+        : '';
+      const refreshNotice = hooksUnavailable
+        ? ' Sidebar refresh hooks were unavailable; manually refresh navigation if needed.'
+        : '';
+
+      if (publishError) {
+        this.setState({ isCreateLibraryPageModalOpen: false }, () => {
+          this.addMessageToChat({
+            id: generateId('library-page-partial-success'),
+            sender: 'ai',
+            content: `Library page \"${values.pageName}\" was created at ${routePath}, but publish failed: ${publishError}.${routeAdjustNotice}${refreshNotice}`,
+            timestamp: new Date().toISOString(),
+          });
+
+          if (values.openAfterCreate) {
+            this.navigateToPageRoute(createResult.route);
+          }
+        });
+        return;
+      }
+
+      const publishStatus = values.publishImmediately ? 'created and published' : 'created as unpublished';
+
+      this.setState({ isCreateLibraryPageModalOpen: false }, () => {
+        this.addMessageToChat({
+          id: generateId('library-page-created'),
+          sender: 'ai',
+          content: `Library page \"${values.pageName}\" ${publishStatus} at ${routePath}.${routeAdjustNotice}${refreshNotice}`,
+          timestamp: new Date().toISOString(),
+        });
+
+        if (values.openAfterCreate) {
+          this.navigateToPageRoute(createResult.route);
+        }
+      });
+    } catch (error) {
+      this.setState({
+        createLibraryPageModalError: error instanceof Error
+          ? error.message
+          : 'Failed to create Library page',
+      });
+    } finally {
+      this.setState({ isCreateLibraryPageSubmitting: false });
+    }
+  };
+
   handleCreateRagCollection = async (payload: RagCreateCollectionInput): Promise<RagCollection> => {
     if (!this.ragService) {
       throw new Error('RAG service not available');
@@ -509,6 +682,259 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     this.loadRagCollections({ silent: true });
 
     return created;
+  };
+
+  /**
+   * Resolve configured conversation type with a safe default.
+   */
+  private getConfiguredStringValue(
+    primaryValue: string | null | undefined,
+    fallbackValue: string | null | undefined
+  ): string {
+    const normalizedPrimary = typeof primaryValue === 'string' ? primaryValue.trim() : '';
+    if (normalizedPrimary) {
+      return normalizedPrimary;
+    }
+
+    const normalizedFallback = typeof fallbackValue === 'string' ? fallbackValue.trim() : '';
+    return normalizedFallback;
+  }
+
+  private getConfiguredBooleanValue(
+    primaryValue: boolean | null | undefined,
+    fallbackValue: boolean | null | undefined
+  ): boolean | undefined {
+    if (typeof primaryValue === 'boolean') {
+      return primaryValue;
+    }
+
+    if (typeof fallbackValue === 'boolean') {
+      return fallbackValue;
+    }
+
+    return undefined;
+  }
+
+  private isDefaultLibraryScopeEnabled(): boolean {
+    return this.getConfiguredBooleanValue(
+      this.props.defaultLibraryScopeEnabled,
+      this.props.default_library_scope_enabled
+    ) === true;
+  }
+
+  private isProjectScopeLocked(): boolean {
+    return this.getConfiguredBooleanValue(
+      this.props.lockProjectScope,
+      this.props.lock_project_scope
+    ) === true;
+  }
+
+  private isPersonaSelectionLocked(): boolean {
+    return this.getConfiguredBooleanValue(
+      this.props.lockPersonaSelection,
+      this.props.lock_persona_selection
+    ) === true;
+  }
+
+  private isModelSelectionLocked(): boolean {
+    return this.getConfiguredBooleanValue(
+      this.props.lockModelSelection,
+      this.props.lock_model_selection
+    ) === true;
+  }
+
+  private getEffectiveConversationType(): string {
+    const configuredConversationType = this.getConfiguredStringValue(
+      this.props.conversationType,
+      this.props.conversation_type
+    );
+    return configuredConversationType || 'chat';
+  }
+
+  private getConfiguredProjectLifecycle(): string {
+    const configuredLifecycle = this.getConfiguredStringValue(
+      this.props.defaultProjectLifecycle,
+      this.props.default_project_lifecycle
+    );
+    return configuredLifecycle || 'active';
+  }
+
+  private shouldApplyDefaultsOnNewChat(): boolean {
+    return this.getConfiguredBooleanValue(
+      this.props.applyDefaultsOnNewChat,
+      this.props.apply_defaults_on_new_chat
+    ) !== false;
+  }
+
+  private getNormalizedDefaultProjectSlug(): string | null {
+    const normalizedDefaultProjectSlug = this.getConfiguredStringValue(
+      this.props.defaultProjectSlug,
+      this.props.default_project_slug
+    );
+    return normalizedDefaultProjectSlug || null;
+  }
+
+  private applyConfiguredProjectDefault = (options: { forNewChat?: boolean } = {}): boolean => {
+    const { forNewChat = false } = options;
+    if (forNewChat && !this.shouldApplyDefaultsOnNewChat()) {
+      return false;
+    }
+
+    if (!this.isDefaultLibraryScopeEnabled()) {
+      return false;
+    }
+
+    const configuredSlug = this.getNormalizedDefaultProjectSlug();
+    const matchedProject = configuredSlug
+      ? this.libraryProjects.find(project => project.slug.toLowerCase() === configuredSlug.toLowerCase())
+      : null;
+
+    this.currentMcpProjectSource = 'config_default';
+
+    if (!matchedProject) {
+      if (configuredSlug) {
+        console.warn(`Configured default project slug "${configuredSlug}" was not found; disabling Library scope.`);
+      }
+      this.setState({
+        libraryScope: {
+          enabled: false,
+          project: null
+        }
+      });
+      return true;
+    }
+
+    this.setState({
+      libraryScope: {
+        enabled: true,
+        project: matchedProject
+      }
+    });
+    return true;
+  };
+
+  private getNormalizedDefaultPersonaId(): string | null {
+    const normalizedPersonaId = this.getConfiguredStringValue(
+      this.props.defaultPersonaId,
+      this.props.default_persona_id
+    );
+    return normalizedPersonaId || null;
+  }
+
+  private applyConfiguredPersonaDefault = (options: { forNewChat?: boolean } = {}): boolean => {
+    const { forNewChat = false } = options;
+    if (forNewChat && !this.shouldApplyDefaultsOnNewChat()) {
+      return false;
+    }
+
+    if (!forNewChat && (this.state.conversation_id || this.state.selectedConversation)) {
+      return false;
+    }
+
+    const configuredPersonaId = this.getNormalizedDefaultPersonaId();
+    if (!configuredPersonaId) {
+      return false;
+    }
+
+    const matchedPersona = this.state.personas.find(
+      persona => `${persona.id}` === configuredPersonaId
+    );
+    if (matchedPersona) {
+      this.setState({
+        selectedPersona: matchedPersona,
+        pendingPersonaId: null
+      });
+      return true;
+    }
+
+    this.setState({
+      pendingPersonaId: configuredPersonaId
+    }, () => {
+      this.resolvePendingPersonaSelection();
+    });
+    return true;
+  };
+
+  private parseConfiguredDefaultModelKey():
+    | { provider: string; serverId: string; modelName: string }
+    | null {
+    const rawModelKey = this.getConfiguredStringValue(
+      this.props.defaultModelKey,
+      this.props.default_model_key
+    );
+    if (!rawModelKey) {
+      return null;
+    }
+
+    const firstDelimiter = rawModelKey.indexOf('::');
+    const secondDelimiter = rawModelKey.indexOf('::', firstDelimiter + 2);
+    if (firstDelimiter <= 0 || secondDelimiter <= firstDelimiter + 2) {
+      return null;
+    }
+
+    const provider = rawModelKey.slice(0, firstDelimiter).trim();
+    const serverId = rawModelKey.slice(firstDelimiter + 2, secondDelimiter).trim();
+    const modelName = rawModelKey.slice(secondDelimiter + 2).trim();
+
+    if (!provider || !serverId || !modelName) {
+      return null;
+    }
+
+    return { provider, serverId, modelName };
+  }
+
+  private findConfiguredDefaultModel(models: ModelInfo[]): ModelInfo | null {
+    const parsedModelKey = this.parseConfiguredDefaultModelKey();
+    if (!parsedModelKey) {
+      return null;
+    }
+
+    const normalize = (value: string) => value.trim().toLowerCase();
+    return models.find(model =>
+      normalize(model.provider || '') === normalize(parsedModelKey.provider) &&
+      normalize(model.serverId || '') === normalize(parsedModelKey.serverId) &&
+      normalize(model.name || '') === normalize(parsedModelKey.modelName)
+    ) || null;
+  }
+
+  private applyConfiguredModelDefault = (options: { forNewChat?: boolean } = {}): boolean => {
+    const { forNewChat = false } = options;
+    if (forNewChat && !this.shouldApplyDefaultsOnNewChat()) {
+      return false;
+    }
+
+    if (!forNewChat && (this.state.conversation_id || this.state.selectedConversation || this.state.pendingModelKey)) {
+      return false;
+    }
+
+    const configuredModel = this.findConfiguredDefaultModel(this.state.models);
+    if (!configuredModel) {
+      return false;
+    }
+
+    const selectedModel = this.state.selectedModel;
+    const normalize = (value: string) => value.trim().toLowerCase();
+    const sameSelection = Boolean(
+      selectedModel &&
+      !selectedModel.isTemporary &&
+      normalize(selectedModel.provider || '') === normalize(configuredModel.provider || '') &&
+      normalize(selectedModel.serverId || '') === normalize(configuredModel.serverId || '') &&
+      normalize(selectedModel.name || '') === normalize(configuredModel.name || '')
+    );
+
+    if (sameSelection && !this.state.pendingModelKey && !this.state.pendingModelSnapshot) {
+      return true;
+    }
+
+    this.setState({
+      selectedModel: configuredModel,
+      pendingModelKey: null,
+      pendingModelSnapshot: null
+    }, () => {
+      this.broadcastModelSelection(configuredModel);
+    });
+
+    return true;
   };
 
   /**
@@ -660,11 +1086,12 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
    * Load personas from API or use provided personas
    */
   loadPersonas = async () => {
-          if (this.props.availablePersonas) {
-        // Use provided personas
-        this.resolvePendingPersonaSelection();
-        return;
-      }
+    if (this.props.availablePersonas) {
+      // Use provided personas
+      this.applyConfiguredPersonaDefault();
+      this.resolvePendingPersonaSelection();
+      return;
+    }
 
     this.setState({ isLoadingPersonas: true });
     
@@ -676,10 +1103,12 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
           personas: personas,
           isLoadingPersonas: false
         }, () => {
+          this.applyConfiguredPersonaDefault();
           this.resolvePendingPersonaSelection();
         });
       } else {
         this.setState({ isLoadingPersonas: false }, () => {
+          this.applyConfiguredPersonaDefault();
           this.resolvePendingPersonaSelection();
         });
       }
@@ -689,6 +1118,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         personas: [],
         isLoadingPersonas: false
       }, () => {
+        this.applyConfiguredPersonaDefault();
         this.resolvePendingPersonaSelection();
       });
     }
@@ -783,6 +1213,9 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
             pendingModelSnapshot: null,
           };
         }, () => {
+          if (this.applyConfiguredModelDefault()) {
+            return;
+          }
           if (this.state.pendingModelKey) {
             this.resolvePendingModelSelection();
           } else {
@@ -903,6 +1336,9 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
               pendingModelSnapshot: null,
             };
           }, () => {
+            if (this.applyConfiguredModelDefault()) {
+              return;
+            }
             if (this.state.pendingModelKey) {
               this.resolvePendingModelSelection();
             } else {
@@ -968,7 +1404,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       const params: any = {
         skip: 0,
         limit: 50,
-        conversation_type: this.props.conversationType || "chat"
+        conversation_type: this.getEffectiveConversationType()
       };
       
       // Add page_id if available for page-specific conversations
@@ -1059,7 +1495,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       const params: any = {
         skip: 0,
         limit: 50, // Fetch up to 50 conversations
-        conversation_type: this.props.conversationType || "chat" // Filter by conversation type
+        conversation_type: this.getEffectiveConversationType() // Filter by conversation type
       };
       
       // Add page_id if available for page-specific conversations
@@ -1154,6 +1590,10 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
    * Handle model selection change
    */
   handleModelChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    if (this.isModelSelectionLocked()) {
+      return;
+    }
+
     const modelId = event.target.value;
     const selectedModel = this.state.models.find(model => 
       `${model.provider}_${model.serverId}_${model.name}` === modelId
@@ -1201,6 +1641,19 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     const safeModel = (modelName || '').trim();
     const safeServer = (serverName || '').trim();
     return `${safeServer}:::${safeModel}`;
+  }
+
+  private getCanonicalModelKey(model: ModelInfo | null): string {
+    if (!model) {
+      return '';
+    }
+    const provider = (model.provider || '').trim();
+    const serverId = (model.serverId || '').trim();
+    const modelName = (model.name || '').trim();
+    if (!provider || !serverId || !modelName) {
+      return '';
+    }
+    return `${provider}::${serverId}::${modelName}`;
   }
 
   private isEmbeddingModelName(modelName?: string | null) {
@@ -1352,6 +1805,9 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     this.fetchPersonaById(normalizedPendingId)
       .then(persona => {
         if (!persona) {
+          if (this.state.pendingPersonaId && `${this.state.pendingPersonaId}` === normalizedPendingId) {
+            this.setState({ pendingPersonaId: null });
+          }
           return;
         }
 
@@ -1376,6 +1832,9 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       })
       .catch(error => {
         console.error('Error resolving pending persona:', error);
+        if (this.state.pendingPersonaId && `${this.state.pendingPersonaId}` === normalizedPendingId) {
+          this.setState({ pendingPersonaId: null });
+        }
       })
       .finally(() => {
         this.pendingPersonaRequestId = null;
@@ -1434,6 +1893,10 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
    * Handle persona selection
    */
   handlePersonaChange = async (event: React.ChangeEvent<HTMLSelectElement>) => {
+    if (this.isPersonaSelectionLocked()) {
+      return;
+    }
+
     const personaId = event.target.value;
     const selectedPersona = personaId
       ? this.state.personas.find(p => p.id === personaId) || null
@@ -1460,6 +1923,10 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
    * Handle persona toggle (when turning personas on/off)
    */
   handlePersonaToggle = () => {
+    if (this.isPersonaSelectionLocked()) {
+      return;
+    }
+
     // Reset to no persona when toggling off
     console.log('🎭 Persona toggled off - resetting to no persona');
     this.setState({ selectedPersona: null, pendingPersonaId: null }, () => {
@@ -1482,6 +1949,9 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       pendingModelSnapshot: null,
       pendingPersonaId: null
     }, async () => {
+      this.applyConfiguredProjectDefault({ forNewChat: true });
+      this.applyConfiguredPersonaDefault({ forNewChat: true });
+      this.applyConfiguredModelDefault({ forNewChat: true });
       console.log(`✅ New chat started - conversation_id: ${this.state.conversation_id}`);
       // Only use persona greeting if persona selection is enabled and a persona is selected
       const personaGreeting = this.state.showPersonaSelection && this.state.selectedPersona?.sample_greeting;
@@ -1722,13 +2192,30 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         messages.push(...response.messages.map((msg: any) => {
           const rawContent: string = msg.message || '';
           const parsedDoc = this.parseDocumentContext(rawContent);
+          const rawMetadata = msg.message_metadata && typeof msg.message_metadata === 'object'
+            ? msg.message_metadata
+            : {};
+          const rawMcp = rawMetadata.mcp && typeof rawMetadata.mcp === 'object'
+            ? rawMetadata.mcp
+            : {};
+          const parsedApproval = this.normalizeApprovalRequestFromEvent(rawMcp.approval_request);
+          const approvalResolution = rawMcp.approval_resolution && typeof rawMcp.approval_resolution === 'object'
+            ? rawMcp.approval_resolution
+            : null;
+          if (parsedApproval && approvalResolution && typeof approvalResolution.status === 'string') {
+            parsedApproval.status = approvalResolution.status;
+            if (typeof approvalResolution.resolved_at === 'string') {
+              parsedApproval.resolved_at = approvalResolution.resolved_at;
+            }
+          }
 
           return {
             id: msg.id || generateId('history'),
             sender: msg.sender === 'llm' ? 'ai' : 'user' as 'ai' | 'user',
             content: parsedDoc ? rawContent.trim() : this.cleanMessageContent(rawContent),
             timestamp: msg.created_at,
-            ...(parsedDoc ? { isDocumentContext: true, documentData: parsedDoc } : {})
+            ...(parsedDoc ? { isDocumentContext: true, documentData: parsedDoc } : {}),
+            ...(parsedApproval ? { isApprovalRequest: true, approvalData: parsedApproval } : {}),
           };
         }));
       }
@@ -2757,6 +3244,11 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
    * Toggle Library scope on/off
    */
   handleLibraryToggle = () => {
+    if (this.isProjectScopeLocked()) {
+      return;
+    }
+
+    this.currentMcpProjectSource = 'ui';
     this.setState(prevState => ({
       libraryScope: {
         ...prevState.libraryScope,
@@ -2770,6 +3262,11 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
    * Select a Library project (null = "All")
    */
   handleLibrarySelectProject = (project: LibraryProject | null) => {
+    if (this.isProjectScopeLocked()) {
+      return;
+    }
+
+    this.currentMcpProjectSource = 'ui';
     this.setState({
       libraryScope: {
         enabled: true,
@@ -2784,12 +3281,258 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   loadLibraryProjects = async () => {
     if (!this.libraryService) return;
     try {
-      const projects = await this.libraryService.fetchProjects('active');
+      const lifecycle = this.isDefaultLibraryScopeEnabled()
+        ? this.getConfiguredProjectLifecycle()
+        : 'active';
+      const projects = await this.libraryService.fetchProjects(lifecycle);
       this.libraryProjects = projects;
+      this.applyConfiguredProjectDefault();
       this.forceUpdate();
     } catch (err) {
       console.error('Failed to load library projects:', err);
     }
+  };
+
+  private normalizeProjectToken(value: string): string {
+    return (value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  private matchProjectFromPrompt(prompt: string): { project: LibraryProject; confidence: number } | null {
+    if (!prompt || !this.libraryProjects.length) return null;
+
+    const loweredPrompt = prompt.toLowerCase();
+    const normalizedPrompt = this.normalizeProjectToken(prompt);
+    const candidates: Array<{ project: LibraryProject; confidence: number }> = [];
+
+    for (const project of this.libraryProjects) {
+      const slug = (project.slug || '').toLowerCase();
+      const name = (project.name || '').toLowerCase();
+      const normalizedSlug = this.normalizeProjectToken(slug);
+      const normalizedName = this.normalizeProjectToken(name);
+
+      let confidence = 0;
+      if (slug && new RegExp(`\\b${slug.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\\b`, 'i').test(loweredPrompt)) {
+        confidence = 0.99;
+      } else if (name && new RegExp(`\\b${name.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\\b`, 'i').test(loweredPrompt)) {
+        confidence = 0.97;
+      } else if (
+        normalizedSlug &&
+        normalizedSlug.length >= 3 &&
+        normalizedPrompt.includes(normalizedSlug)
+      ) {
+        confidence = 0.9;
+      } else if (
+        normalizedName &&
+        normalizedName.length >= 3 &&
+        normalizedPrompt.includes(normalizedName)
+      ) {
+        confidence = 0.88;
+      }
+
+      if (confidence > 0) {
+        candidates.push({ project, confidence });
+      }
+    }
+
+    if (!candidates.length) return null;
+
+    candidates.sort((a, b) => b.confidence - a.confidence);
+    const top = candidates[0];
+    const second = candidates[1];
+    if (second && Math.abs(top.confidence - second.confidence) < 0.05) {
+      return null;
+    }
+    if (top.confidence < this.PROJECT_AUTO_SELECT_CONFIDENCE) {
+      return null;
+    }
+    return top;
+  }
+
+  private normalizeApprovalRequestFromEvent(event: any): MCPApprovalRequest | null {
+    if (!event || typeof event !== 'object') return null;
+
+    const raw = event.type === 'approval_required' ? event.approval_request : event;
+    if (!raw || typeof raw !== 'object') return null;
+
+    const tool = typeof raw.tool === 'string' ? raw.tool.trim() : '';
+    if (!tool) return null;
+
+    const requestId = typeof raw.request_id === 'string' && raw.request_id.trim()
+      ? raw.request_id.trim()
+      : undefined;
+
+    const approvalRequest: MCPApprovalRequest = {
+      ...raw,
+      type: 'approval_request',
+      tool,
+      request_id: requestId,
+      safety_class: typeof raw.safety_class === 'string' ? raw.safety_class : undefined,
+      summary: typeof raw.summary === 'string' ? raw.summary : undefined,
+      arguments: raw.arguments && typeof raw.arguments === 'object' ? raw.arguments : {},
+      status: (raw.status === 'approved' || raw.status === 'rejected') ? raw.status : 'pending',
+    };
+
+    return approvalRequest;
+  }
+
+  private upsertApprovalRequestMessage = (approvalRequest: MCPApprovalRequest) => {
+    const stableId = approvalRequest.request_id
+      ? `approval-${approvalRequest.request_id}`
+      : `approval-${approvalRequest.tool.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+
+    const content = approvalRequest.summary
+      || `Approval required to run mutating tool '${approvalRequest.tool}'.`;
+
+    this.setState((prevState) => {
+      const existingIndex = prevState.messages.findIndex((message) => message.id === stableId);
+      const approvalMessage: ChatMessage = {
+        id: stableId,
+        sender: 'ai',
+        content,
+        timestamp: new Date().toISOString(),
+        isApprovalRequest: true,
+        approvalData: approvalRequest,
+      };
+
+      if (existingIndex >= 0) {
+        const nextMessages = [...prevState.messages];
+        nextMessages[existingIndex] = {
+          ...nextMessages[existingIndex],
+          ...approvalMessage,
+          timestamp: nextMessages[existingIndex].timestamp || approvalMessage.timestamp,
+        };
+        return { messages: nextMessages };
+      }
+
+      return { messages: [...prevState.messages, approvalMessage] };
+    });
+  };
+
+  private setApprovalRequestStatus = (requestId: string | undefined, status: 'approved' | 'rejected') => {
+    if (!requestId) return;
+    const messageId = `approval-${requestId}`;
+    this.setState((prevState) => ({
+      messages: prevState.messages.map((message) => {
+        if (!message.isApprovalRequest || message.id !== messageId || !message.approvalData) {
+          return message;
+        }
+        return {
+          ...message,
+          approvalData: {
+            ...message.approvalData,
+            status,
+            resolved_at: new Date().toISOString(),
+          },
+        };
+      }),
+    }));
+  };
+
+  private handleMcpMetadataEvent = (event: any) => {
+    if (!event || typeof event !== 'object' || typeof event.type !== 'string') return;
+
+    if (event.type === 'approval_request' || event.type === 'approval_required') {
+      const approvalRequest = this.normalizeApprovalRequestFromEvent(event);
+      if (approvalRequest) {
+        this.upsertApprovalRequestMessage(approvalRequest);
+      }
+      return;
+    }
+
+    if (event.type === 'approval_resolution') {
+      const requestId = typeof event.request_id === 'string' ? event.request_id : undefined;
+      const status = event.status === 'approved' || event.status === 'rejected'
+        ? event.status
+        : undefined;
+      if (requestId && status) {
+        this.setApprovalRequestStatus(requestId, status);
+      }
+      return;
+    }
+
+    if (event.type === 'project_scope_selected' || event.type === 'project_scope_suggested') {
+      const projectSlug = event.project?.slug;
+      if (!projectSlug || !this.libraryProjects.length) return;
+
+      const matchedProject = this.libraryProjects.find(
+        (project) => project.slug.toLowerCase() === String(projectSlug).toLowerCase()
+      );
+      if (!matchedProject) return;
+
+      const confidence = Number(event.confidence || 1);
+      const requiresConfirmation = Boolean(event.requires_confirmation);
+      const shouldAutoApply = event.type === 'project_scope_selected' || (!requiresConfirmation && confidence >= 0.95);
+
+      if (shouldAutoApply) {
+        if (this.isProjectScopeLocked()) {
+          return;
+        }
+        this.currentMcpProjectSource = 'backend_suggested';
+        this.setState((prevState) => ({
+          libraryScope: {
+            enabled: true,
+            project: matchedProject,
+          },
+          messages: [
+            ...prevState.messages,
+            {
+              id: generateId('scope-status'),
+              sender: 'ai',
+              content: `Project scope set to ${matchedProject.name} (${event.type === 'project_scope_selected' ? 'backend selected' : 'backend suggested'}).`,
+              timestamp: new Date().toISOString(),
+            },
+          ],
+        }));
+      } else {
+        this.addMessageToChat({
+          id: generateId('scope-suggested'),
+          sender: 'ai',
+          content: `Project suggestion: ${matchedProject.name} (confidence ${confidence.toFixed(2)}). Select it to enable tools.`,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+  };
+
+  handleApprovalDecision = async (
+    approvalRequest: MCPApprovalRequest,
+    action: 'approve' | 'reject',
+    editedArguments?: Record<string, any>
+  ) => {
+    if (!approvalRequest || !approvalRequest.tool || this.state.isLoading) return;
+
+    const decisionPrompt = action === 'approve'
+      ? `Approve running ${approvalRequest.tool}.`
+      : `Do not run ${approvalRequest.tool}.`;
+
+    const userMessageId = generateId('user-approval');
+    const userMessage: ChatMessage = {
+      id: userMessageId,
+      sender: 'user',
+      content: decisionPrompt,
+      timestamp: new Date().toISOString(),
+      isEditable: false,
+    };
+    this.addMessageToChat(userMessage);
+    this.setApprovalRequestStatus(
+      approvalRequest.request_id,
+      action === 'approve' ? 'approved' : 'rejected'
+    );
+
+    const approvalDecision: MCPApprovalDecision = {
+      action,
+      request_id: approvalRequest.request_id,
+      tool: approvalRequest.tool,
+      arguments: (
+        action === 'approve'
+          ? (editedArguments && typeof editedArguments === 'object'
+              ? editedArguments
+              : approvalRequest.arguments)
+          : approvalRequest.arguments
+      ),
+    };
+
+    await this.sendPromptToAI(decisionPrompt, userMessageId, approvalDecision);
   };
 
   /**
@@ -2838,7 +3581,11 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   /**
    * Send prompt to AI provider and handle response
    */
-  sendPromptToAI = async (prompt: string, userMessageId?: string) => {
+  sendPromptToAI = async (
+    prompt: string,
+    userMessageId?: string,
+    approvalDecision?: MCPApprovalDecision
+  ) => {
     if (!this.aiService || !this.props.services?.api) {
       this.setState({ error: 'API service not available' });
       return;
@@ -2860,6 +3607,49 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       
       let enhancedPrompt = prompt;
       let retrievalDataForResponse: ChatMessage['retrievalData'] | null = null;
+      let effectiveProject = this.state.libraryScope.enabled ? this.state.libraryScope.project : null;
+      let mcpProjectSource: MCPProjectSource = this.currentMcpProjectSource;
+
+      if (this.state.libraryScope.enabled && !effectiveProject && !this.isProjectScopeLocked()) {
+        const matchedProject = this.matchProjectFromPrompt(prompt);
+        if (matchedProject) {
+          effectiveProject = matchedProject.project;
+          mcpProjectSource = 'prompt_auto';
+          this.currentMcpProjectSource = 'prompt_auto';
+          this.setState({
+            libraryScope: {
+              enabled: true,
+              project: matchedProject.project,
+            },
+          });
+          this.addMessageToChat({
+            id: generateId('scope-auto'),
+            sender: 'ai',
+            content: `Project scope set to ${matchedProject.project.name} for this request.`,
+            timestamp: new Date().toISOString(),
+          });
+        } else {
+          this.addMessageToChat({
+            id: generateId('scope-needed'),
+            sender: 'ai',
+            content: 'Library tools are disabled until you select a project.',
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+
+      const mcpScopeParams: MCPRequestParams = {
+        mcp_tools_enabled: Boolean(this.state.libraryScope.enabled && effectiveProject),
+        mcp_scope_mode: (this.state.libraryScope.enabled && effectiveProject ? 'project' : 'none') as 'none' | 'project',
+        mcp_project_slug: effectiveProject?.slug,
+        mcp_project_name: effectiveProject?.name,
+        mcp_project_lifecycle: effectiveProject?.lifecycle || 'active',
+        mcp_project_source: mcpProjectSource,
+        mcp_plugin_slug: 'BrainDriveLibraryService',
+      };
+      if (approvalDecision) {
+        mcpScopeParams.mcp_approval = approvalDecision;
+      }
 
       // RAG retrieval (collections) if a collection is selected
       if (this.state.ragEnabled && this.state.selectedRagCollectionId && this.ragService) {
@@ -2910,22 +3700,18 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       }
       
       // Library context injection if enabled
-      if (this.state.libraryScope.enabled && this.libraryService) {
+      if (this.state.libraryScope.enabled && effectiveProject && this.libraryService) {
         try {
           let libraryContext = '';
-          if (this.state.libraryScope.project) {
-            const ctx = await this.libraryService.fetchProjectContext(
-              this.state.libraryScope.project.slug,
-              this.state.libraryScope.project.lifecycle || 'active'
-            );
-            if (ctx?.files) {
-              const fileEntries = Object.entries(ctx.files)
-                .map(([name, f]) => `--- ${name} ---\n${f.content}`)
-                .join('\n\n');
-              libraryContext = `[LIBRARY CONTEXT - Project: ${this.state.libraryScope.project.name}]\n${fileEntries}\n[END LIBRARY CONTEXT]`;
-            }
-          } else {
-            libraryContext = '[LIBRARY CONTEXT - Scope: All projects]\nThe user has enabled Library access to all projects. You can help them read and write files in their BrainDrive Library.\n[END LIBRARY CONTEXT]';
+          const ctx = await this.libraryService.fetchProjectContext(
+            effectiveProject.slug,
+            effectiveProject.lifecycle || 'active'
+          );
+          if (ctx?.files) {
+            const fileEntries = Object.entries(ctx.files)
+              .map(([name, f]) => `--- ${name} ---\n${f.content}`)
+              .join('\n\n');
+            libraryContext = `[LIBRARY CONTEXT - Project: ${effectiveProject.name}]\n${fileEntries}\n[END LIBRARY CONTEXT]`;
           }
           if (libraryContext) {
             enhancedPrompt = `${libraryContext}\n\n${enhancedPrompt}`;
@@ -3079,14 +3865,16 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         this.state.selectedModel,
         this.state.useStreaming,
         this.state.conversation_id,
-        this.props.conversationType || "chat",
+        this.getEffectiveConversationType(),
         onChunk,
         onConversationId,
         pageContext,
         this.state.selectedPersona || undefined,
         this.currentStreamingAbortController,
         contextMessages,
-        this.state.documentContextMode || undefined
+        this.state.documentContextMode || undefined,
+        mcpScopeParams,
+        this.handleMcpMetadataEvent
       );
 
       if (shouldInjectDocumentContext && this.state.conversation_id && !this.state.documentContextInjectedConversationId) {
@@ -3198,6 +3986,45 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     
     const { promptQuestion } = this.props;
     const themeClass = this.state.currentTheme === 'dark' ? 'dark-theme' : '';
+    const libraryPageProjectOptions = [
+      {
+        value: '',
+        label: 'All',
+        description: 'No fixed default project',
+      },
+      ...this.libraryProjects.map((project) => ({
+        value: project.slug,
+        label: project.name,
+        description: `${project.lifecycle} • ${project.slug}`,
+        keywords: [project.slug, project.lifecycle, project.path],
+      })),
+    ];
+    const libraryPagePersonaOptions = [
+      {
+        value: '',
+        label: 'None',
+        description: 'No default persona',
+      },
+      ...personas.map((persona) => ({
+        value: `${persona.id}`,
+        label: persona.name,
+        description: persona.description || undefined,
+        keywords: [persona.name, persona.description || '', `${persona.id}`],
+      })),
+    ];
+    const libraryPageModelOptions = [
+      {
+        value: '',
+        label: 'None',
+        description: 'No default model override',
+      },
+      ...models.map((model) => ({
+        value: this.getCanonicalModelKey(model),
+        label: `${model.name} (${model.serverName})`,
+        description: `${model.provider} • ${model.serverId}`,
+        keywords: [model.name, model.provider, model.serverName, model.serverId],
+      })),
+    ];
     
     return (
       <div className={`braindrive-chat-container ${themeClass}`}>
@@ -3209,10 +4036,12 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
             isLoadingModels={isLoadingModels}
             onModelChange={this.handleModelChange}
             showModelSelection={showModelSelection}
+            lockModelSelection={this.isModelSelectionLocked()}
             personas={personas}
             selectedPersona={selectedPersona}
             onPersonaChange={this.handlePersonaChange}
             showPersonaSelection={showPersonaSelection}
+            lockPersonaSelection={this.isPersonaSelectionLocked()}
             conversations={conversations}
             selectedConversation={selectedConversation}
             onConversationSelect={this.handleConversationSelect}
@@ -3252,6 +4081,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
                   onToggleMarkdown={this.toggleMarkdownView}
                   onScroll={this.handleScroll}
                   onUserScrollIntent={this.handleUserScrollIntent}
+                  onApprovalDecision={this.handleApprovalDecision}
                 />
               </div>
               
@@ -3287,10 +4117,24 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
                 onPersonaChange={this.handlePersonaChange}
                 onPersonaToggle={this.handlePersonaToggle}
                 showPersonaSelection={false} // Moved to header
+                lockPersonaSelection={this.isPersonaSelectionLocked()}
                 libraryScope={this.state.libraryScope}
                 libraryProjects={this.libraryProjects}
                 onLibraryToggle={this.handleLibraryToggle}
                 onLibrarySelectProject={this.handleLibrarySelectProject}
+                onOpenCreateLibraryPage={this.openCreateLibraryPageModal}
+                lockProjectScope={this.isProjectScopeLocked()}
+              />
+
+              <CreateLibraryPageModal
+                isOpen={this.state.isCreateLibraryPageModalOpen}
+                isSubmitting={this.state.isCreateLibraryPageSubmitting}
+                errorMessage={this.state.createLibraryPageModalError}
+                projectOptions={libraryPageProjectOptions}
+                personaOptions={libraryPagePersonaOptions}
+                modelOptions={libraryPageModelOptions}
+                onClose={this.closeCreateLibraryPageModal}
+                onSubmit={this.handleCreateLibraryPageSubmit}
               />
 
               {this.state.ragEnabled && (

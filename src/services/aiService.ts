@@ -1,5 +1,5 @@
-import { ModelInfo, Services, ChatMessage, PersonaInfo } from '../types';
-import { extractTextFromData, generateId } from '../utils';
+import { ModelInfo, Services, PersonaInfo, MCPRequestParams, MCPMetadataEvent } from '../types';
+import { extractTextFromData } from '../utils';
 
 export class AIService {
   private services: Services;
@@ -41,7 +41,9 @@ export class AIService {
     selectedPersona?: PersonaInfo,  // Add persona parameter
     abortController?: AbortController, // Add abort controller for cancellation
     contextMessages: { role: string; content: string }[] = [],
-    documentContextMode?: 'one-shot' | 'persist'
+    documentContextMode?: 'one-shot' | 'persist',
+    mcpScope?: MCPRequestParams,
+    onMetadataEvent?: (event: MCPMetadataEvent) => void
   ): Promise<boolean> {
     if (!this.services?.api) {
       throw new Error('API service not available');
@@ -109,6 +111,14 @@ export class AIService {
       requestParams.params.document_context_mode = documentContextMode;
     }
 
+    // Carry MCP project-scoped tool contract into request params
+    if (mcpScope) {
+      requestParams.params = {
+        ...requestParams.params,
+        ...mcpScope,
+      };
+    }
+
     try {
       let success = false;
 
@@ -141,6 +151,24 @@ export class AIService {
                 // Store the conversation_id if it's in the response
                 if (data.conversation_id && !conversationId) {
                   onConversationId(data.conversation_id);
+                }
+
+                // Handle backend metadata events (scope/tooling sync)
+                if (
+                  data &&
+                  typeof data === 'object' &&
+                  typeof data.type === 'string' &&
+                  (data.type === 'project_scope_suggested' ||
+                    data.type === 'project_scope_selected' ||
+                    data.type === 'tooling_state' ||
+                    data.type === 'approval_request' ||
+                    data.type === 'approval_required' ||
+                    data.type === 'approval_resolution')
+                ) {
+                  if (onMetadataEvent) {
+                    onMetadataEvent(data as MCPMetadataEvent);
+                  }
+                  return;
                 }
 
                 const chunkText = extractTextFromData(data);
@@ -176,8 +204,28 @@ export class AIService {
           }
 
           const responseText = extractTextFromData(responseData);
+          if (responseData && responseData.tooling_state && onMetadataEvent) {
+            onMetadataEvent({
+              type: 'tooling_state',
+              ...(responseData.tooling_state as Record<string, any>),
+            });
+          }
+          if (responseData && responseData.approval_required && responseData.approval_request && onMetadataEvent) {
+            onMetadataEvent({
+              type: 'approval_required',
+              approval_request: responseData.approval_request,
+            });
+          }
+          if (responseData && responseData.approval_resolution && onMetadataEvent) {
+            onMetadataEvent({
+              type: 'approval_resolution',
+              ...(responseData.approval_resolution as Record<string, any>),
+            });
+          }
           if (responseText) {
             onChunk(responseText);
+            success = true;
+          } else if (responseData?.approval_required || responseData?.approval_resolution) {
             success = true;
           } else {
             throw new Error('No response text received');

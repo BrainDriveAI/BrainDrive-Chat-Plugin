@@ -111,6 +111,34 @@
   background-color: var(--bg-color);
 }
 
+/* Dark theme adjustments for approval requests */
+.dark-theme .message-approval-request .message-bubble {
+  background-color: rgba(255, 152, 0, 0.16);
+  border-color: rgba(255, 152, 0, 0.36);
+}
+
+.dark-theme .approval-status-pending {
+  color: #ffd8ad;
+}
+
+.dark-theme .approval-status-approved {
+  color: #b7efb9;
+}
+
+.dark-theme .approval-status-rejected {
+  color: #ffc4c4;
+}
+
+.dark-theme .approval-args,
+.dark-theme .approval-diff {
+  background-color: var(--bg-color);
+}
+
+.dark-theme .approval-args-editor {
+  background-color: var(--bg-color);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
 /* Dark theme adjustments for conversation menu */
 .dark-theme .conversation-menu-item.datetime {
   background-color: rgba(255, 255, 255, 0.02);

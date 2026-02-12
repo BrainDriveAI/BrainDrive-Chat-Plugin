@@ -44,6 +44,10 @@ export interface ChatMessage {
     intent?: RagIntentResponse | null;
     metadata?: Record<string, any>;
   };
+
+  // MCP approval request card
+  isApprovalRequest?: boolean;
+  approvalData?: MCPApprovalRequest;
   // Markdown toggle
   showRawMarkdown?: boolean;
   
@@ -274,6 +278,56 @@ export interface LibraryScope {
   enabled: boolean;
   project: LibraryProject | null; // null = "All"
 }
+
+export type MCPProjectSource = 'ui' | 'prompt_auto' | 'backend_suggested' | 'config_default';
+
+export type MCPApprovalStatus = 'pending' | 'approved' | 'rejected';
+
+export interface MCPApprovalRequest {
+  type?: 'approval_request';
+  request_id?: string;
+  tool: string;
+  safety_class?: string;
+  summary?: string;
+  arguments?: Record<string, any>;
+  diff_preview?: string;
+  status?: MCPApprovalStatus;
+  created_at?: string;
+  resolved_at?: string;
+  [key: string]: any;
+}
+
+export interface MCPApprovalDecision {
+  action: 'approve' | 'reject';
+  request_id?: string;
+  tool?: string;
+  arguments?: Record<string, any>;
+}
+
+export interface MCPRequestScope {
+  mcp_tools_enabled: boolean;
+  mcp_scope_mode: 'none' | 'project';
+  mcp_project_slug?: string;
+  mcp_project_name?: string;
+  mcp_project_lifecycle?: string;
+  mcp_project_source: MCPProjectSource;
+  mcp_plugin_slug?: string;
+}
+
+export interface MCPRequestParams extends MCPRequestScope {
+  mcp_approval?: MCPApprovalDecision;
+}
+
+export interface MCPMetadataEvent {
+  type:
+    | 'project_scope_suggested'
+    | 'project_scope_selected'
+    | 'tooling_state'
+    | 'approval_request'
+    | 'approval_required'
+    | 'approval_resolution';
+  [key: string]: any;
+}
 // Service interfaces
 export interface ApiService {
   get: (url: string, options?: any) => Promise<ApiResponse>;
@@ -325,11 +379,33 @@ export interface Services {
 // Component props
 export interface BrainDriveChatProps {
   moduleId?: string;
+  id?: string;
+  instanceId?: string;
   services: Services;
   initialGreeting?: string;
   defaultStreamingMode?: boolean;
   promptQuestion?: string;
   conversationType?: string; // Allow plugins to specify their type
+  defaultLibraryScopeEnabled?: boolean;
+  defaultProjectSlug?: string | null;
+  defaultProjectLifecycle?: string;
+  defaultPersonaId?: string | null;
+  defaultModelKey?: string | null;
+  applyDefaultsOnNewChat?: boolean;
+  lockProjectScope?: boolean;
+  lockPersonaSelection?: boolean;
+  lockModelSelection?: boolean;
+  // Snake_case aliases persisted by page/module config payloads.
+  conversation_type?: string;
+  default_library_scope_enabled?: boolean;
+  default_project_slug?: string | null;
+  default_project_lifecycle?: string;
+  default_persona_id?: string | null;
+  default_model_key?: string | null;
+  apply_defaults_on_new_chat?: boolean;
+  lock_project_scope?: boolean;
+  lock_persona_selection?: boolean;
+  lock_model_selection?: boolean;
   // Persona-related props
   availablePersonas?: PersonaInfo[];  // Developer-defined personas
   showPersonaSelection?: boolean;     // Control visibility
@@ -394,6 +470,9 @@ export interface BrainDriveChatState {
   isCreateRagCollectionModalOpen: boolean;
   isManageRagDocumentsModalOpen: boolean;
   manageRagDocumentsCollectionId: string | null;
+  isCreateLibraryPageModalOpen: boolean;
+  isCreateLibraryPageSubmitting: boolean;
+  createLibraryPageModalError: string | null;
   
   // Library state
   libraryScope: LibraryScope;

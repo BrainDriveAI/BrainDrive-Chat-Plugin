@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import ChatInput from '../components/ChatInput';
 
 // Minimal props factory
@@ -37,6 +37,7 @@ const defaultProps = (): React.ComponentProps<typeof ChatInput> => ({
   ],
   onLibraryToggle: jest.fn(),
   onLibrarySelectProject: jest.fn(),
+  onOpenCreateLibraryPage: jest.fn(),
 });
 
 describe('Library Integration in ChatInput', () => {
@@ -88,5 +89,33 @@ describe('Library Integration in ChatInput', () => {
   test('No visual indicator when Library is disabled', () => {
     render(<ChatInput {...defaultProps()} />);
     expect(screen.queryByTestId('library-scope-indicator')).not.toBeInTheDocument();
+  });
+
+  test('Create library page action remains available when project scope is locked', () => {
+    const props = defaultProps();
+    props.lockProjectScope = true;
+    render(<ChatInput {...props} />);
+
+    const plusButton = screen.getByLabelText('Open feature menu');
+    fireEvent.click(plusButton);
+    const libraryButton = screen.getByText('Library').closest('button');
+    fireEvent.click(libraryButton!);
+
+    expect(libraryButton).toBeEnabled();
+    expect(screen.getByText('Create Library Page...')).toBeInTheDocument();
+    const allButton = screen.getByText('All').closest('button');
+    expect(allButton).toBeDisabled();
+  });
+
+  test('Locked Library scope cannot be disabled from indicator', () => {
+    const props = defaultProps();
+    props.lockProjectScope = true;
+    props.libraryScope = { enabled: true, project: null };
+    render(<ChatInput {...props} />);
+
+    const closeBtn = screen.getByTitle('Library scope is locked for this page');
+    expect(closeBtn).toBeDisabled();
+    fireEvent.click(closeBtn);
+    expect(props.onLibraryToggle).not.toHaveBeenCalled();
   });
 });

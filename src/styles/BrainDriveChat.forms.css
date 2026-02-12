@@ -206,6 +206,53 @@
   gap: 1rem;
 }
 
+.library-page-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.library-page-tab {
+  border: 1px solid var(--border-color);
+  background-color: transparent;
+  color: var(--text-color);
+  border-radius: 0.5rem;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease;
+}
+
+.library-page-tab:hover:not(:disabled) {
+  border-color: var(--button-primary-bg);
+}
+
+.library-page-tab.active {
+  border-color: var(--button-primary-bg);
+  background-color: rgba(33, 150, 243, 0.12);
+  color: var(--text-color);
+}
+
+.library-page-tab:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.modal-field-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-color);
+  margin-bottom: -0.5rem;
+}
+
+.modal-field-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
 .modal-input {
   padding: 0.75rem;
   border: 1px solid var(--border-color);
@@ -226,6 +273,49 @@
   color: var(--text-color);
   line-height: 1.5;
   margin: 0;
+}
+
+.modal-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--text-color);
+  cursor: pointer;
+}
+
+.modal-checkbox-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.modal-checkbox-text {
+  flex: 1 1 auto;
+}
+
+.modal-info-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--border-color);
+  color: var(--text-color);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1;
+  opacity: 0.85;
+  cursor: help;
+}
+
+.modal-field-help {
+  margin-top: -0.6rem;
+  font-size: 0.75rem;
+  color: var(--text-color);
+  opacity: 0.72;
 }
 
 .modal-actions {
@@ -281,6 +371,11 @@
   max-width: 720px;
 }
 
+.modal-content.modal-lg .modal-body {
+  max-height: calc(90vh - 80px);
+  overflow-y: auto;
+}
+
 .modal-error {
   padding: 0.75rem;
   border-radius: 0.5rem;
@@ -295,6 +390,12 @@
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
+}
+
+.library-page-divider {
+  height: 1px;
+  background-color: var(--border-color);
+  margin: 0.25rem 0;
 }
 
 .rag-color-label {
