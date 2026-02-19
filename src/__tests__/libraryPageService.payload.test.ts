@@ -152,6 +152,8 @@ async function testPayloadMappingAndModuleClone() {
   assertEqual(moduleDefinition.config.default_library_scope_enabled, true, 'default_library_scope_enabled should map');
   assertEqual(moduleDefinition.config.default_project_slug, 'finance', 'default_project_slug should map');
   assertEqual(moduleDefinition.config.default_project_lifecycle, 'active', 'default_project_lifecycle should map');
+  assertEqual(moduleDefinition.config.default_scope_root, 'projects', 'default_scope_root should map');
+  assertEqual(moduleDefinition.config.default_scope_path, 'projects/active/finance', 'default_scope_path should map');
   assertEqual(moduleDefinition.config.default_persona_id, 'persona-1', 'default_persona_id should map');
   assertEqual(moduleDefinition.config.default_model_key, 'ollama::primary-local::phi4', 'default_model_key should map');
   assertEqual(moduleDefinition.config.apply_defaults_on_new_chat, true, 'apply_defaults_on_new_chat should map');
@@ -186,9 +188,41 @@ async function testRouteCollisionRetry() {
   assertEqual(result.route, createCalls[1].data.route, 'result route should match retried payload');
 }
 
+async function testDefaultProjectSlugDerivedFromRoute() {
+  const api = new MockApi(false);
+  const service = new LibraryPageService(api as any);
+
+  await service.createLibraryPage(buildValues({
+    routeSlug: 'roadmap-2026',
+    defaultProjectSlug: null,
+    defaultLibraryScopeEnabled: true,
+    defaultProjectLifecycle: 'active',
+  }), {
+    pageId: '123e4567-e89b-12d3-a456-426614174000',
+    pluginInstanceId: 'plugin-123',
+    moduleId: 'BrainDriveChat',
+  });
+
+  const createPayload = api.postCalls.find((call) => call.url === '/api/v1/pages')!.data;
+  const moduleDefinition = Object.values(createPayload.content.modules)[0] as any;
+
+  assertEqual(
+    moduleDefinition.config.default_project_slug,
+    'roadmap-2026',
+    'default_project_slug should derive from route when not provided'
+  );
+  assertEqual(moduleDefinition.config.default_scope_root, 'projects', 'derived default_scope_root should be projects');
+  assertEqual(
+    moduleDefinition.config.default_scope_path,
+    'projects/active/roadmap-2026',
+    'derived default_scope_path should use lifecycle and route slug'
+  );
+}
+
 async function run() {
   await testPayloadMappingAndModuleClone();
   await testRouteCollisionRetry();
+  await testDefaultProjectSlugDerivedFromRoute();
   console.log('libraryPageService.payload.test.ts: all assertions passed');
 }
 

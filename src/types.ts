@@ -268,6 +268,7 @@ export interface LibraryProject {
   slug: string;
   lifecycle: string;
   path: string;
+  scope_root?: 'projects' | 'life';
   has_agent_md: boolean;
   has_spec: boolean;
   has_build_plan: boolean;
@@ -389,6 +390,8 @@ export interface BrainDriveChatProps {
   defaultLibraryScopeEnabled?: boolean;
   defaultProjectSlug?: string | null;
   defaultProjectLifecycle?: string;
+  defaultScopeRoot?: 'projects' | 'life' | null;
+  defaultScopePath?: string | null;
   defaultPersonaId?: string | null;
   defaultModelKey?: string | null;
   applyDefaultsOnNewChat?: boolean;
@@ -400,6 +403,8 @@ export interface BrainDriveChatProps {
   default_library_scope_enabled?: boolean;
   default_project_slug?: string | null;
   default_project_lifecycle?: string;
+  default_scope_root?: 'projects' | 'life' | null;
+  default_scope_path?: string | null;
   default_persona_id?: string | null;
   default_model_key?: string | null;
   apply_defaults_on_new_chat?: boolean;

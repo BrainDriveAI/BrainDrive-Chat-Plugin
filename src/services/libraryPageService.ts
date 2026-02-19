@@ -136,12 +136,38 @@ export class LibraryPageService {
     return `library-chat-${Math.floor(Date.now() / 1000)}`;
   }
 
-  private buildLibraryChatConfig(values: LibraryPageCreateValues): Record<string, any> {
+  private resolveDefaultProjectSlug(values: LibraryPageCreateValues, route: string): string | null {
+    const configured = this.slugify(values.defaultProjectSlug || '');
+    if (configured) {
+      return configured;
+    }
+
+    const fromRoute = this.slugify(route || values.routeSlug || '');
+    if (fromRoute) {
+      return fromRoute;
+    }
+
+    const fromName = this.slugify(values.pageName || '');
+    return fromName || null;
+  }
+
+  private buildLibraryChatConfig(values: LibraryPageCreateValues, route: string): Record<string, any> {
+    const defaultLibraryScopeEnabled = Boolean(values.defaultLibraryScopeEnabled);
+    const defaultProjectLifecycle = (values.defaultProjectLifecycle || '').trim() || 'active';
+    const defaultProjectSlug = defaultLibraryScopeEnabled
+      ? this.resolveDefaultProjectSlug(values, route)
+      : null;
+    const defaultScopePath = defaultProjectSlug
+      ? 'projects/' + defaultProjectLifecycle + '/' + defaultProjectSlug
+      : null;
+
     return {
       conversation_type: (values.conversationType || '').trim() || 'chat',
-      default_library_scope_enabled: Boolean(values.defaultLibraryScopeEnabled),
-      default_project_slug: values.defaultProjectSlug || null,
-      default_project_lifecycle: (values.defaultProjectLifecycle || '').trim() || 'active',
+      default_library_scope_enabled: defaultLibraryScopeEnabled,
+      default_project_slug: defaultProjectSlug,
+      default_project_lifecycle: defaultProjectLifecycle,
+      default_scope_root: defaultProjectSlug ? 'projects' : null,
+      default_scope_path: defaultScopePath,
       default_persona_id: values.defaultPersonaId || null,
       default_model_key: values.defaultModelKey || null,
       apply_defaults_on_new_chat: values.applyDefaultsOnNewChat !== false,
@@ -157,7 +183,7 @@ export class LibraryPageService {
     blueprint: ChatModuleBlueprint
   ): Record<string, any> {
     const newModuleUniqueId = this.generateModuleUniqueId(blueprint.moduleDefinition);
-    const libraryConfig = this.buildLibraryChatConfig(values);
+    const libraryConfig = this.buildLibraryChatConfig(values, route);
 
     const moduleDefinition = this.deepClone(blueprint.moduleDefinition);
     moduleDefinition.config = {
