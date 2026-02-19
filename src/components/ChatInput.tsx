@@ -42,6 +42,7 @@ interface ChatInputProps {
   // Library props
   libraryScope?: LibraryScope;
   libraryProjects?: LibraryProject[];
+  libraryLifeScopes?: LibraryProject[];
   onLibraryToggle?: () => void;
   onLibrarySelectProject?: (project: LibraryProject | null) => void;
   onOpenCreateLibraryPage?: () => void;
@@ -55,6 +56,7 @@ interface ChatInputState {
   isRagMenuOpen: boolean;
   openRagCollectionId: string | null;
   isLibraryMenuOpen: boolean;
+  openLibraryScopeGroup: 'life' | 'projects' | null;
 }
 
 class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
@@ -69,6 +71,7 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
       isRagMenuOpen: false,
       openRagCollectionId: null,
       isLibraryMenuOpen: false,
+      openLibraryScopeGroup: null,
     };
   }
 
@@ -114,7 +117,7 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
 
   handleClickOutside = (event: MouseEvent) => {
     if (this.menuRef.current && !this.menuRef.current.contains(event.target as Node)) {
-      this.setState({ isMenuOpen: false, isRagMenuOpen: false, openRagCollectionId: null, isLibraryMenuOpen: false });
+      this.setState({ isMenuOpen: false, isRagMenuOpen: false, openRagCollectionId: null, isLibraryMenuOpen: false, openLibraryScopeGroup: null });
     }
   };
 
@@ -142,6 +145,7 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
       isMenuOpen: !prevState.isMenuOpen,
       isRagMenuOpen: false,
       openRagCollectionId: null,
+      isLibraryMenuOpen: false, openLibraryScopeGroup: null,
     }), () => {
       if (this.state.isMenuOpen && this.props.onRagRefreshCollections) {
         this.props.onRagRefreshCollections();
@@ -153,18 +157,18 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
     if (this.props.onFileUpload) {
       this.props.onFileUpload();
     }
-    this.setState({ isMenuOpen: false, isRagMenuOpen: false, openRagCollectionId: null, isLibraryMenuOpen: false });
+    this.setState({ isMenuOpen: false, isRagMenuOpen: false, openRagCollectionId: null, isLibraryMenuOpen: false, openLibraryScopeGroup: null });
   };
 
   handleWebSearchToggle = () => {
     if (this.props.webSearchDisabled) {
-      this.setState({ isMenuOpen: false, isRagMenuOpen: false, openRagCollectionId: null, isLibraryMenuOpen: false });
+      this.setState({ isMenuOpen: false, isRagMenuOpen: false, openRagCollectionId: null, isLibraryMenuOpen: false, openLibraryScopeGroup: null });
       return;
     }
     if (this.props.onToggleWebSearch) {
       this.props.onToggleWebSearch();
     }
-    this.setState({ isMenuOpen: false, isRagMenuOpen: false, openRagCollectionId: null, isLibraryMenuOpen: false });
+    this.setState({ isMenuOpen: false, isRagMenuOpen: false, openRagCollectionId: null, isLibraryMenuOpen: false, openLibraryScopeGroup: null });
   };
 
   handlePersonaToggle = () => {
@@ -188,7 +192,7 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
         isMenuOpen: false,
         isRagMenuOpen: false,
         openRagCollectionId: null,
-        isLibraryMenuOpen: false,
+        isLibraryMenuOpen: false, openLibraryScopeGroup: null,
       };
     });
   };
@@ -203,7 +207,7 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
 
   openRagMenu = () => {
     if (this.props.ragEnabled === false) return;
-    this.setState({ isRagMenuOpen: true, openRagCollectionId: null });
+    this.setState({ isRagMenuOpen: true, openRagCollectionId: null, isLibraryMenuOpen: false, openLibraryScopeGroup: null });
     if (this.props.onRagRefreshCollections) {
       this.props.onRagRefreshCollections();
     }
@@ -215,11 +219,25 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
   };
 
   closeAllMenus = () => {
-    this.setState({ isMenuOpen: false, isRagMenuOpen: false, openRagCollectionId: null, isLibraryMenuOpen: false });
+    this.setState({ isMenuOpen: false, isRagMenuOpen: false, openRagCollectionId: null, isLibraryMenuOpen: false, openLibraryScopeGroup: null });
   };
 
   openLibraryMenu = () => {
-    this.setState({ isLibraryMenuOpen: true, isRagMenuOpen: false, openRagCollectionId: null });
+    this.setState({
+      isLibraryMenuOpen: true,
+      isRagMenuOpen: false,
+      openRagCollectionId: null,
+      openLibraryScopeGroup: null,
+    });
+  };
+
+  openLibraryScopeGroup = (group: 'life' | 'projects') => {
+    this.setState((prevState) => ({
+      isLibraryMenuOpen: true,
+      isRagMenuOpen: false,
+      openRagCollectionId: null,
+      openLibraryScopeGroup: prevState.openLibraryScopeGroup === group ? null : group,
+    }));
   };
 
   handleLibrarySelectAll = () => {
@@ -261,6 +279,86 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
       this.props.onOpenCreateLibraryPage();
     }
   };
+
+  private getLibraryScopeLabel(project: LibraryProject | null | undefined): string {
+    if (!project) {
+      return 'All';
+    }
+
+    if (project.scope_root === 'life') {
+      return `Life / ${project.name}`;
+    }
+
+    return `Projects / ${project.name}`;
+  }
+
+  private isLibraryScopeSelected(project: LibraryProject): boolean {
+    const selected = this.props.libraryScope?.project;
+    if (!this.props.libraryScope?.enabled || !selected) {
+      return false;
+    }
+
+    const selectedRoot = selected.scope_root || 'projects';
+    const projectRoot = project.scope_root || 'projects';
+    if (selectedRoot !== projectRoot) {
+      return false;
+    }
+
+    if (selected.path && project.path) {
+      return selected.path === project.path;
+    }
+
+    return selected.slug === project.slug;
+  }
+
+  private renderLibraryScopeSection(
+    title: string,
+    projects: LibraryProject[],
+    options: {
+      emptyLabel?: string;
+      nestedClassName?: string;
+      nested?: boolean;
+      includeTitle?: boolean;
+    } = {}
+  ): React.ReactNode {
+    const emptyLabel = options.emptyLabel || 'No scopes found';
+    const nestedClassName = options.nestedClassName || '';
+    const nested = options.nested !== false;
+    const includeTitle = options.includeTitle !== false;
+    const itemClassName = ['menu-item', nested ? 'menu-item-nested' : '', nestedClassName].filter(Boolean).join(' ');
+
+    return (
+      <>
+        {includeTitle && <div className="menu-section-title">{title}</div>}
+        {!projects.length ? (
+          <button className={itemClassName} disabled>
+            <div className="menu-item-text">
+              <span className="menu-item-subtext">{emptyLabel}</span>
+            </div>
+          </button>
+        ) : (
+          projects.map((project) => {
+            const isSelected = this.isLibraryScopeSelected(project);
+            const key = `${project.scope_root || 'projects'}:${project.path || project.slug}`;
+            return (
+              <button
+                key={key}
+                className={itemClassName}
+                onClick={() => this.handleLibrarySelectProject(project)}
+                disabled={this.props.isLoading || this.props.isLoadingHistory || !!this.props.lockProjectScope}
+                title={project.path || project.name}
+              >
+                <span className="menu-item-title">{project.name}</span>
+                <span className="menu-item-right">
+                  {isSelected && <span className="menu-item-check"><CheckIcon /></span>}
+                </span>
+              </button>
+            );
+          })
+        )}
+      </>
+    );
+  }
 
   handleRagClearSelection = () => {
     this.props.onRagSelectCollection(null);
@@ -310,7 +408,7 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
       lockProjectScope
     } = this.props;
 
-    // Local dropdown state retained for future menu use; not used in current layout
+    // Menu helpers
     const isRagEnabled = ragEnabled !== false;
 
     const selectedRagCollection = selectedRagCollectionId
@@ -323,11 +421,22 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
         : selectedRagCollectionId
           ? 'Selected collection'
           : 'Select a collection to enable RAG';
-    
+
+    const libraryLifeScopes = (this.props.libraryLifeScopes || []).map((scope) => ({
+      ...scope,
+      scope_root: 'life' as const,
+    }));
+    const libraryProjectScopes = (this.props.libraryProjects || []).map((scope) => ({
+      ...scope,
+      scope_root: scope.scope_root || 'projects',
+    }));
+    const selectedLibraryScopeLabel = this.getLibraryScopeLabel(this.props.libraryScope?.project);
+    const hasActiveLibraryScope = Boolean(this.props.libraryScope?.enabled);
+
     return (
       <div className="chat-input-container">
         <div className="chat-input-wrapper">
-          <div className="input-with-buttons">
+          <div className={`input-with-buttons ${hasActiveLibraryScope ? 'has-library-scope' : ''}`.trim()}>
             <div className={`chat-input-row ${this.state.isMultiline ? 'multiline' : ''}`}>
               {/* Left feature action */}
               <div className="menu-container" ref={this.menuRef}>
@@ -395,7 +504,7 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
                         <span className="menu-item-title">Library</span>
                         <span className="menu-item-subtext">
                           {this.props.libraryScope?.enabled
-                            ? `Scope: ${this.props.libraryScope.project?.name || 'All'}`
+                            ? `Scope: ${selectedLibraryScopeLabel}`
                             : 'Access your local Library'}
                         </span>
                       </div>
@@ -424,23 +533,66 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
                           </span>
                         </button>
                         <div className="menu-divider" />
-                        {(this.props.libraryProjects || []).map((project) => {
-                          const isSelected = this.props.libraryScope?.enabled && this.props.libraryScope?.project?.slug === project.slug;
-                          return (
-                            <button
-                              key={project.slug}
-                              className="menu-item"
-                              onClick={() => this.handleLibrarySelectProject(project)}
-                              disabled={isLoading || isLoadingHistory || !!lockProjectScope}
-                              title={project.name}
-                            >
-                              <span className="menu-item-title">{project.name}</span>
-                              <span className="menu-item-right">
-                                {isSelected && <span className="menu-item-check"><CheckIcon /></span>}
-                              </span>
-                            </button>
-                          );
-                        })}
+                        <button
+                          className="menu-item menu-item-has-submenu"
+                          onClick={() => this.openLibraryScopeGroup('life')}
+                          disabled={isLoading || isLoadingHistory}
+                        >
+                          <div className="menu-item-text">
+                            <span className="menu-item-title">Life</span>
+                            <span className="menu-item-subtext">
+                              {libraryLifeScopes.length
+                                ? `${libraryLifeScopes.length} scope${libraryLifeScopes.length === 1 ? '' : 's'}`
+                                : 'No life topics yet'}
+                            </span>
+                          </div>
+                          <span className="menu-item-right">
+                            {this.props.libraryScope?.enabled && this.props.libraryScope?.project?.scope_root === 'life' && (
+                              <span className="menu-item-check"><CheckIcon /></span>
+                            )}
+                            <ChevronRightIcon />
+                          </span>
+                        </button>
+                        <button
+                          className="menu-item menu-item-has-submenu"
+                          onClick={() => this.openLibraryScopeGroup('projects')}
+                          disabled={isLoading || isLoadingHistory}
+                        >
+                          <div className="menu-item-text">
+                            <span className="menu-item-title">Projects</span>
+                            <span className="menu-item-subtext">
+                              {libraryProjectScopes.length
+                                ? `${libraryProjectScopes.length} scope${libraryProjectScopes.length === 1 ? '' : 's'}`
+                                : 'No projects yet'}
+                            </span>
+                          </div>
+                          <span className="menu-item-right">
+                            {this.props.libraryScope?.enabled && this.props.libraryScope?.project?.scope_root !== 'life' && this.props.libraryScope?.project && (
+                              <span className="menu-item-check"><CheckIcon /></span>
+                            )}
+                            <ChevronRightIcon />
+                          </span>
+                        </button>
+                        {this.state.openLibraryScopeGroup === 'life' && (
+                          <div className="dropdown-menu feature-menu menu-submenu" role="menu">
+                            {this.renderLibraryScopeSection('Life', libraryLifeScopes, {
+                              emptyLabel: 'No life topics yet',
+                              nestedClassName: 'menu-item-life-scope',
+                              nested: false,
+                              includeTitle: false,
+                            })}
+                          </div>
+                        )}
+                        {this.state.openLibraryScopeGroup === 'projects' && (
+                          <div className="dropdown-menu feature-menu menu-submenu" role="menu">
+                            {this.renderLibraryScopeSection('Projects', libraryProjectScopes, {
+                              emptyLabel: 'No projects yet',
+                              nestedClassName: 'menu-item-project-scope',
+                              nested: false,
+                              includeTitle: false,
+                            })}
+                          </div>
+                        )}
                         {this.props.libraryScope?.enabled && (
                           <>
                             <div className="menu-divider" />
@@ -536,6 +688,7 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
                 )}
               </div>
 
+
               {/* Persona Selector - optional inline control */}
               {showPersonaSelection && (
                 <select
@@ -583,7 +736,7 @@ class ChatInput extends React.Component<ChatInputProps, ChatInputState> {
             {this.props.libraryScope?.enabled && (
               <div className="library-scope-indicator" data-testid="library-scope-indicator">
                 <LibraryIcon />
-                <span>Library: {this.props.libraryScope.project?.name || 'All'}</span>
+                <span>Library: {selectedLibraryScopeLabel}</span>
                 <button
                   className="library-scope-close"
                   onClick={this.handleLibraryDisable}

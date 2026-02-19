@@ -32,8 +32,12 @@ const defaultProps = (): React.ComponentProps<typeof ChatInput> => ({
   // Library props
   libraryScope: { enabled: false, project: null },
   libraryProjects: [
-    { name: 'Alpha', slug: 'alpha', lifecycle: 'active', path: '/projects/active/alpha', has_agent_md: true, has_spec: true, has_build_plan: false, has_decisions: false },
-    { name: 'Beta', slug: 'beta', lifecycle: 'active', path: '/projects/active/beta', has_agent_md: true, has_spec: false, has_build_plan: false, has_decisions: false },
+    { name: 'Alpha', slug: 'alpha', lifecycle: 'active', path: 'projects/active/alpha', scope_root: 'projects', has_agent_md: true, has_spec: true, has_build_plan: false, has_decisions: false },
+    { name: 'Beta', slug: 'beta', lifecycle: 'active', path: 'projects/active/beta', scope_root: 'projects', has_agent_md: true, has_spec: false, has_build_plan: false, has_decisions: false },
+  ],
+  libraryLifeScopes: [
+    { name: 'Finances', slug: 'finances', lifecycle: 'active', path: 'life/finances', scope_root: 'life', has_agent_md: true, has_spec: true, has_build_plan: true, has_decisions: false },
+    { name: 'Fitness', slug: 'fitness', lifecycle: 'active', path: 'life/fitness', scope_root: 'life', has_agent_md: true, has_spec: true, has_build_plan: true, has_decisions: false },
   ],
   onLibraryToggle: jest.fn(),
   onLibrarySelectProject: jest.fn(),
@@ -48,13 +52,17 @@ describe('Library Integration in ChatInput', () => {
     expect(screen.getByText('Library')).toBeInTheDocument();
   });
 
-  test('Project selection submenu shows All and project names', () => {
+  test('Project selection submenu shows Life and Projects sections', () => {
     render(<ChatInput {...defaultProps()} />);
     const plusButton = screen.getByLabelText('Open feature menu');
     fireEvent.click(plusButton);
     const libraryItem = screen.getByText('Library').closest('button')!;
     fireEvent.click(libraryItem);
     expect(screen.getByText('All')).toBeInTheDocument();
+    expect(screen.getByText('Life')).toBeInTheDocument();
+    expect(screen.getByText('Projects')).toBeInTheDocument();
+    expect(screen.getByText('Finances')).toBeInTheDocument();
+    expect(screen.getByText('Fitness')).toBeInTheDocument();
     expect(screen.getByText('Alpha')).toBeInTheDocument();
     expect(screen.getByText('Beta')).toBeInTheDocument();
   });
@@ -80,7 +88,6 @@ describe('Library Integration in ChatInput', () => {
     const props = defaultProps();
     props.libraryScope = { enabled: true, project: null };
     render(<ChatInput {...props} />);
-    // Click the close button on the scope indicator
     const closeBtn = screen.getByTitle('Disable Library');
     fireEvent.click(closeBtn);
     expect(props.onLibraryToggle).toHaveBeenCalled();

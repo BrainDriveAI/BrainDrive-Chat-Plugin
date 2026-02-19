@@ -121,6 +121,18 @@
   box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.12), 0 8px 24px rgba(0, 0, 0, 0.18);
 }
 
+.input-with-buttons.has-library-scope {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.35rem;
+  padding-top: 0.45rem;
+  padding-bottom: 0.45rem;
+}
+
+.input-with-buttons.has-library-scope .chat-input-row {
+  width: 100%;
+}
+
 .chat-input-row {
   display: flex;
   align-items: center; /* center when single line */

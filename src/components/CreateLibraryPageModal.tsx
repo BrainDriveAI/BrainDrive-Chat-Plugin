@@ -83,7 +83,7 @@ class CreateLibraryPageModal extends React.Component<
       openAfterCreate: true,
       conversationType: this.buildUniqueConversationType('library-chat'),
       conversationTypeTouched: false,
-      defaultLibraryScopeEnabled: false,
+      defaultLibraryScopeEnabled: true,
       defaultProjectSlug: '',
       defaultProjectLifecycle: 'active',
       defaultPersonaId: '',

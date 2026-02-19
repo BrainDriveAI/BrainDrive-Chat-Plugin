@@ -76,6 +76,10 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   private libraryService: LibraryService | null = null;
   private libraryPageService: LibraryPageService | null = null;
   private libraryProjects: LibraryProject[] = [];
+  private libraryLifeScopes: LibraryProject[] = [];
+  private libraryStartupStatusShownKey: string | null = null;
+  private pendingLibraryStartupStatusKey: string | null = null;
+  private readonly LIBRARY_SCOPE_SETTING_KEY = 'ai_prompt_chat_library_scope_selection';
   private currentStreamingAbortController: AbortController | null = null;
   private menuButtonRef: HTMLButtonElement | null = null;
   // Keep the live edge comfortably in view instead of snapping flush bottom
@@ -365,6 +369,8 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     } else {
       this.updateScrollState();
     }
+
+    void this.emitLibraryStartupStatusIfNeeded();
   }
 
   componentWillUnmount() {
@@ -569,6 +575,66 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     }
   }
 
+  private slugifyLibraryProjectToken(value: string): string {
+    return String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .replace(/-{2,}/g, '-');
+  }
+
+  private resolveLibraryProjectSlugForPage(values: LibraryPageModalValues, route: string): string | null {
+    const configured = this.slugifyLibraryProjectToken(values.defaultProjectSlug || '');
+    if (configured) {
+      return configured;
+    }
+
+    const fromRoute = this.slugifyLibraryProjectToken(route || values.routeSlug || '');
+    if (fromRoute) {
+      return fromRoute;
+    }
+
+    const fromName = this.slugifyLibraryProjectToken(values.pageName || '');
+    return fromName || null;
+  }
+
+  private async provisionLibraryProjectForPage(
+    values: LibraryPageModalValues,
+    route: string
+  ): Promise<{ notice: string; error: string | null }> {
+    if (!this.libraryService) {
+      return { notice: '', error: null };
+    }
+
+    const slug = this.resolveLibraryProjectSlugForPage(values, route);
+    if (!slug) {
+      return { notice: '', error: null };
+    }
+
+    try {
+      const provisionResult = await this.libraryService.ensureProject({
+        slug,
+        name: values.pageName,
+        lifecycle: values.defaultProjectLifecycle || 'active',
+      });
+
+      void this.loadLibraryProjects();
+
+      const notice = provisionResult.created
+        ? ` Library project "${provisionResult.slug}" was created.`
+        : ` Library project "${provisionResult.slug}" already existed.`;
+      return { notice, error: null };
+    } catch (error) {
+      return {
+        notice: '',
+        error: error instanceof Error
+          ? error.message
+          : 'Unknown library project provisioning error',
+      };
+    }
+  }
+
   handleCreateLibraryPageSubmit = async (values: LibraryPageModalValues): Promise<void> => {
     if (this.state.isCreateLibraryPageSubmitting) {
       return;
@@ -590,6 +656,12 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         pluginInstanceId: this.getPluginInstanceId(),
         moduleId: this.props.moduleId || null,
       });
+
+      const projectProvision = await this.provisionLibraryProjectForPage(values, createResult.route);
+      const projectNotice = projectProvision.notice;
+      const projectErrorNotice = projectProvision.error
+        ? ` Library project provisioning failed: ${projectProvision.error}.`
+        : '';
 
       let publishError: string | null = null;
       if (values.publishImmediately) {
@@ -615,7 +687,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
           this.addMessageToChat({
             id: generateId('library-page-partial-success'),
             sender: 'ai',
-            content: `Library page \"${values.pageName}\" was created at ${routePath}, but publish failed: ${publishError}.${routeAdjustNotice}${refreshNotice}`,
+            content: `Library page "${values.pageName}" was created at ${routePath}, but publish failed: ${publishError}.${routeAdjustNotice}${refreshNotice}${projectNotice}${projectErrorNotice}`,
             timestamp: new Date().toISOString(),
           });
 
@@ -632,7 +704,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
         this.addMessageToChat({
           id: generateId('library-page-created'),
           sender: 'ai',
-          content: `Library page \"${values.pageName}\" ${publishStatus} at ${routePath}.${routeAdjustNotice}${refreshNotice}`,
+          content: `Library page "${values.pageName}" ${publishStatus} at ${routePath}.${routeAdjustNotice}${refreshNotice}${projectNotice}${projectErrorNotice}`,
           timestamp: new Date().toISOString(),
         });
 
@@ -774,6 +846,322 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     return normalizedDefaultProjectSlug || null;
   }
 
+  private getNormalizedDefaultScopeRoot(): 'projects' | 'life' | null {
+    const configuredScopeRoot = this.getConfiguredStringValue(
+      this.props.defaultScopeRoot || null,
+      this.props.default_scope_root || null
+    ).toLowerCase();
+
+    if (configuredScopeRoot === 'life') {
+      return 'life';
+    }
+    if (configuredScopeRoot === 'projects') {
+      return 'projects';
+    }
+    return null;
+  }
+
+  private getNormalizedDefaultScopePath(): string | null {
+    const configuredScopePath = this.getConfiguredStringValue(
+      this.props.defaultScopePath || null,
+      this.props.default_scope_path || null
+    );
+    return this.normalizeLibraryScopePath(configuredScopePath);
+  }
+
+  private normalizeLibraryScopePath(value: string | null | undefined): string | null {
+    if (!value || typeof value !== 'string') {
+      return null;
+    }
+
+    const normalized = value
+      .trim()
+      .replace(/\\+/g, '/')
+      .replace(/^\/+/, '')
+      .replace(/\/+$/, '');
+
+    if (!normalized) {
+      return null;
+    }
+
+    if (normalized === 'capture') {
+      return 'capture';
+    }
+
+    if (normalized.startsWith('life/')) {
+      return normalized;
+    }
+
+    if (normalized.startsWith('projects/')) {
+      return normalized;
+    }
+
+    return `projects/active/${normalized}`;
+  }
+
+  private getScopePathForProject(project: LibraryProject | null | undefined): string | null {
+    if (!project) {
+      return null;
+    }
+
+    const normalizedPath = this.normalizeLibraryScopePath(project.path);
+    if (normalizedPath) {
+      return normalizedPath;
+    }
+
+    const normalizedSlug = (project.slug || '').trim();
+    if (!normalizedSlug) {
+      return null;
+    }
+
+    if (project.scope_root === 'life') {
+      return `life/${normalizedSlug}`;
+    }
+
+    return `projects/active/${normalizedSlug}`;
+  }
+
+  private getAllLibraryScopeItems(): LibraryProject[] {
+    return [...this.libraryLifeScopes, ...this.libraryProjects];
+  }
+
+  private findLibraryScopeByPath(path: string | null | undefined): LibraryProject | null {
+    const normalizedPath = this.normalizeLibraryScopePath(path);
+    if (!normalizedPath) {
+      return null;
+    }
+
+    const target = normalizedPath.toLowerCase();
+    return this.getAllLibraryScopeItems().find((project) => {
+      const projectPath = this.getScopePathForProject(project);
+      return (projectPath || '').toLowerCase() === target;
+    }) || null;
+  }
+
+  private findLibraryScopeBySlug(slug: string | null | undefined, rootHint?: 'projects' | 'life' | null): LibraryProject | null {
+    if (!slug) {
+      return null;
+    }
+
+    const normalizedSlug = String(slug).trim().toLowerCase();
+    if (!normalizedSlug) {
+      return null;
+    }
+
+    const allItems = this.getAllLibraryScopeItems();
+    if (rootHint) {
+      const rooted = allItems.find((project) => {
+        if (project.scope_root !== rootHint) return false;
+        return String(project.slug || '').trim().toLowerCase() === normalizedSlug;
+      });
+      if (rooted) {
+        return rooted;
+      }
+    }
+
+    return allItems.find((project) => {
+      return String(project.slug || '').trim().toLowerCase() === normalizedSlug;
+    }) || null;
+  }
+
+  private normalizeLifeTopic(value: string | null | undefined): string | null {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (!normalized) {
+      return null;
+    }
+
+    const compact = normalized.replace(/[^a-z0-9]+/g, '');
+    const aliases: Record<string, string> = {
+      whyfinder: 'whyfinder',
+      why: 'whyfinder',
+      career: 'career',
+      finance: 'finances',
+      finances: 'finances',
+      fitness: 'fitness',
+      relationship: 'relationships',
+      relationships: 'relationships',
+      people: 'relationships',
+    };
+
+    return aliases[compact] || null;
+  }
+
+  private inferLifeTopicFromConversationType(): string | null {
+    const conversationType = this.getEffectiveConversationType().trim().toLowerCase();
+    if (!conversationType.startsWith('life-')) {
+      return null;
+    }
+
+    return this.normalizeLifeTopic(conversationType.slice(5));
+  }
+
+  private inferLifeTopicFromPageContext(): string | null {
+    const pageContext: any = this.getCurrentPageContext();
+    const candidates = [
+      pageContext?.pageName,
+      pageContext?.name,
+      pageContext?.title,
+      pageContext?.pageRoute,
+      pageContext?.route,
+      pageContext?.path,
+    ];
+
+    for (const candidate of candidates) {
+      if (typeof candidate !== 'string' || !candidate.trim()) {
+        continue;
+      }
+
+      const lowered = candidate.toLowerCase();
+      const explicitLifeMatch = lowered.match(/life[\/_\-\s]+([a-z0-9-]+)/i);
+      if (explicitLifeMatch && explicitLifeMatch[1]) {
+        const topicFromPath = this.normalizeLifeTopic(explicitLifeMatch[1]);
+        if (topicFromPath) {
+          return topicFromPath;
+        }
+      }
+
+      const tokens = lowered.split(/[^a-z0-9]+/g).filter(Boolean);
+      for (const token of tokens) {
+        const topic = this.normalizeLifeTopic(token);
+        if (topic) {
+          return topic;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  private applyContextualLifeScopeDefault(): boolean {
+    const topic = this.inferLifeTopicFromConversationType() || this.inferLifeTopicFromPageContext();
+    if (!topic) {
+      return false;
+    }
+
+    const matchedProject = this.findLibraryScopeByPath(`life/${topic}`)
+      || this.findLibraryScopeBySlug(topic, 'life');
+
+    if (!matchedProject) {
+      return false;
+    }
+
+    const nextScope: LibraryScope = {
+      enabled: true,
+      project: matchedProject,
+    };
+
+    this.currentMcpProjectSource = 'backend_suggested';
+    this.setState({ libraryScope: nextScope }, () => {
+      void this.saveLibraryScopeSelection(nextScope);
+    });
+    return true;
+  }
+
+  private slugifyScopeCandidate(value: string | null | undefined): string | null {
+    const normalized = String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\\+/g, '/')
+      .replace(/^\/+/, '')
+      .replace(/\/+$/, '');
+
+    if (!normalized) {
+      return null;
+    }
+
+    const pageRouteMatch = normalized.match(/(?:^|\/)pages\/([^/?#]+)/);
+    const token = pageRouteMatch && pageRouteMatch[1]
+      ? pageRouteMatch[1]
+      : normalized.split('/').filter(Boolean).pop() || '';
+
+    const slug = token
+      .replace(/[^a-z0-9-]+/g, '-')
+      .replace(/-{2,}/g, '-')
+      .replace(/^-+|-+$/g, '');
+
+    return slug || null;
+  }
+
+  private inferProjectSlugFromPageContext(): string | null {
+    const pageContext: any = this.getCurrentPageContext();
+    const locationPath = (typeof window !== 'undefined' && window.location)
+      ? `${window.location.pathname || ''}${window.location.search || ''}`
+      : '';
+
+    const candidates = [
+      pageContext?.pageRoute,
+      pageContext?.route,
+      pageContext?.path,
+      locationPath,
+    ];
+
+    for (const candidate of candidates) {
+      if (typeof candidate !== 'string' || !candidate.trim()) {
+        continue;
+      }
+
+      const slug = this.slugifyScopeCandidate(candidate);
+      if (slug) {
+        return slug;
+      }
+    }
+
+    return null;
+  }
+
+  private applyRouteMatchedProjectDefault(options: { forNewChat?: boolean } = {}): boolean {
+    const { forNewChat = false } = options;
+    if (forNewChat && !this.shouldApplyDefaultsOnNewChat()) {
+      return false;
+    }
+
+    const hasConfiguredDefaults = this.isDefaultLibraryScopeEnabled()
+      || Boolean(this.getNormalizedDefaultScopePath())
+      || Boolean(this.getNormalizedDefaultProjectSlug())
+      || Boolean(this.getNormalizedDefaultScopeRoot());
+
+    if (hasConfiguredDefaults) {
+      return false;
+    }
+
+    const inferredSlug = this.inferProjectSlugFromPageContext();
+    if (!inferredSlug) {
+      return false;
+    }
+
+    const matchedProject = this.findLibraryScopeByPath(`projects/active/${inferredSlug}`)
+      || this.findLibraryScopeBySlug(inferredSlug, 'projects');
+
+    if (!matchedProject) {
+      return false;
+    }
+
+    const nextScope: LibraryScope = {
+      enabled: true,
+      project: matchedProject,
+    };
+
+    this.currentMcpProjectSource = 'config_default';
+    this.setState({ libraryScope: nextScope }, () => {
+      void this.saveLibraryScopeSelection(nextScope);
+    });
+    return true;
+  }
+
+  private applyInitialLibraryScopeDefaults(options: { forNewChat?: boolean } = {}): void {
+    const appliedConfiguredDefault = this.applyConfiguredProjectDefault(options);
+    if (appliedConfiguredDefault) {
+      return;
+    }
+
+    const appliedRouteProjectDefault = this.applyRouteMatchedProjectDefault(options);
+    if (appliedRouteProjectDefault) {
+      return;
+    }
+
+    this.applyContextualLifeScopeDefault();
+  }
+
   private applyConfiguredProjectDefault = (options: { forNewChat?: boolean } = {}): boolean => {
     const { forNewChat = false } = options;
     if (forNewChat && !this.shouldApplyDefaultsOnNewChat()) {
@@ -784,16 +1172,47 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       return false;
     }
 
+    const configuredScopePath = this.getNormalizedDefaultScopePath();
+    const configuredScopeRoot = this.getNormalizedDefaultScopeRoot();
     const configuredSlug = this.getNormalizedDefaultProjectSlug();
-    const matchedProject = configuredSlug
-      ? this.libraryProjects.find(project => project.slug.toLowerCase() === configuredSlug.toLowerCase())
-      : null;
+    const configuredLifecycle = this.getConfiguredProjectLifecycle();
+
+    let matchedProject: LibraryProject | null = null;
+
+    if (configuredScopePath) {
+      matchedProject = this.findLibraryScopeByPath(configuredScopePath);
+    }
+
+    if (!matchedProject && configuredSlug) {
+      if (configuredScopeRoot === 'life') {
+        matchedProject = this.findLibraryScopeByPath(`life/${configuredSlug}`)
+          || this.findLibraryScopeBySlug(configuredSlug, 'life');
+      } else if (configuredScopeRoot === 'projects') {
+        matchedProject = this.findLibraryScopeByPath(`projects/${configuredLifecycle}/${configuredSlug}`)
+          || this.findLibraryScopeByPath(`projects/active/${configuredSlug}`)
+          || this.findLibraryScopeBySlug(configuredSlug, 'projects');
+      } else {
+        matchedProject = this.findLibraryScopeBySlug(configuredSlug, null);
+      }
+    }
 
     this.currentMcpProjectSource = 'config_default';
 
+    if (!configuredScopePath && !configuredSlug) {
+      this.setState({
+        libraryScope: {
+          enabled: true,
+          project: null
+        }
+      });
+      return true;
+    }
+
     if (!matchedProject) {
-      if (configuredSlug) {
-        console.warn(`Configured default project slug "${configuredSlug}" was not found; disabling Library scope.`);
+      if (configuredScopePath || configuredSlug) {
+        console.warn(
+          `Configured default scope was not found (path=${configuredScopePath || 'n/a'}, slug=${configuredSlug || 'n/a'}); disabling Library scope.`
+        );
       }
       this.setState({
         libraryScope: {
@@ -801,7 +1220,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
           project: null
         }
       });
-      return true;
+      return false;
     }
 
     this.setState({
@@ -979,6 +1398,221 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     }
   }
 
+  private getLibraryScopeStorageKey(): string {
+    return this.getSettingKey(this.LIBRARY_SCOPE_SETTING_KEY);
+  }
+
+  private readLibraryScopeStorage(): any | null {
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return null;
+    }
+
+    const storageKey = this.getLibraryScopeStorageKey();
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw || !raw.trim()) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(raw);
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  private writeLibraryScopeStorage(payload: Record<string, any>): void {
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return;
+    }
+
+    try {
+      const storageKey = this.getLibraryScopeStorageKey();
+      window.localStorage.setItem(storageKey, JSON.stringify(payload));
+    } catch (_error) {
+      // Ignore localStorage write errors (e.g., quota/private mode restrictions).
+    }
+  }
+
+  private getLibraryScopeLabel(project: LibraryProject | null | undefined): string {
+    if (!project) {
+      return 'All';
+    }
+
+    if (project.scope_root === 'life') {
+      return `Life / ${project.name}`;
+    }
+
+    return `Projects / ${project.name}`;
+  }
+
+  private getLibraryStartupStatusKey(scopePath: string): string {
+    const pageContext = this.getCurrentPageContext();
+    const pageId = typeof pageContext?.pageId === 'string' && pageContext.pageId.trim()
+      ? pageContext.pageId.trim().toLowerCase()
+      : 'global';
+    return `${pageId}:${scopePath.toLowerCase()}`;
+  }
+
+  private hasWelcomeGreetingMessage(messages: ChatMessage[] = this.state.messages): boolean {
+    return messages.some((message) => (
+      message.sender === 'ai'
+      && typeof message.id === 'string'
+      && message.id.startsWith('greeting')
+    ));
+  }
+
+  private buildLibraryStartupStatusMessage(status: any, project: LibraryProject): string | null {
+    if (!status || typeof status !== 'object') {
+      return null;
+    }
+
+    const lines: string[] = [`Quick status for ${this.getLibraryScopeLabel(project)}:`];
+
+    const onboarding = status.onboarding && typeof status.onboarding === 'object'
+      ? status.onboarding
+      : null;
+    if (onboarding && onboarding.needs_interview === true) {
+      const topicTitle = typeof onboarding.title === 'string' && onboarding.title.trim()
+        ? onboarding.title.trim()
+        : project.name;
+      const startPrompt = typeof onboarding.start_prompt === 'string' && onboarding.start_prompt.trim()
+        ? onboarding.start_prompt.trim()
+        : `Start my ${topicTitle} onboarding interview.`;
+      lines.push(`Your onboarding interview is not complete yet. You can start anytime by asking: "${startPrompt}"`);
+    }
+
+    const openTasks = status.open_tasks && typeof status.open_tasks === 'object'
+      ? status.open_tasks
+      : null;
+    const openTaskCount = typeof openTasks?.count === 'number' ? openTasks.count : 0;
+
+    if (openTaskCount > 0) {
+      lines.push(`You currently have ${openTaskCount} open task${openTaskCount === 1 ? '' : 's'} in this scope.`);
+
+      const sampleTitles = Array.isArray(openTasks?.tasks)
+        ? openTasks.tasks
+            .map((task: any) => (typeof task?.title === 'string' ? task.title.trim() : ''))
+            .filter((title: string) => Boolean(title))
+            .slice(0, 3)
+        : [];
+
+      if (sampleTitles.length > 0) {
+        lines.push(`Top task${sampleTitles.length === 1 ? '' : 's'}: ${sampleTitles.join('; ')}.`);
+      }
+    } else {
+      lines.push('You currently have no open tasks in this scope.');
+    }
+
+    if (lines.length <= 1) {
+      return null;
+    }
+
+    return lines.join('\n');
+  }
+
+  private emitLibraryStartupStatusIfNeeded = async (): Promise<void> => {
+    if (!this.libraryService) return;
+
+    const { libraryScope, messages } = this.state;
+    if (!libraryScope.enabled || !libraryScope.project) {
+      return;
+    }
+
+    if (!this.hasWelcomeGreetingMessage(messages)) {
+      return;
+    }
+
+    const hasUserMessages = messages.some((message) => message.sender === 'user');
+    if (hasUserMessages) {
+      return;
+    }
+
+    const scopePath = this.getScopePathForProject(libraryScope.project);
+    if (!scopePath) {
+      return;
+    }
+
+    const statusKey = this.getLibraryStartupStatusKey(scopePath);
+    if (
+      this.libraryStartupStatusShownKey === statusKey
+      || this.pendingLibraryStartupStatusKey === statusKey
+    ) {
+      return;
+    }
+
+    this.pendingLibraryStartupStatusKey = statusKey;
+    try {
+      const status = await this.libraryService.fetchScopeStatus(scopePath);
+      const content = this.buildLibraryStartupStatusMessage(status, libraryScope.project);
+      if (content) {
+        this.addMessageToChat({
+          id: generateId('library-startup-status'),
+          sender: 'ai',
+          content,
+          timestamp: new Date().toISOString(),
+        });
+      }
+      this.libraryStartupStatusShownKey = statusKey;
+    } catch (error) {
+      console.warn('Failed to load startup library scope status:', error);
+    } finally {
+      if (this.pendingLibraryStartupStatusKey === statusKey) {
+        this.pendingLibraryStartupStatusKey = null;
+      }
+    }
+  };
+
+  private async saveLibraryScopeSelection(scope: LibraryScope): Promise<void> {
+    const scopePath = this.getScopePathForProject(scope.project);
+    const payload = {
+      enabled: Boolean(scope.enabled),
+      scope_path: scopePath,
+      scope_root: scope.project?.scope_root || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    this.writeLibraryScopeStorage(payload);
+  }
+
+  private async restoreSavedLibraryScopeSelection(): Promise<boolean> {
+    const raw = this.readLibraryScopeStorage();
+    if (!raw || typeof raw !== 'object') {
+      return false;
+    }
+
+    const enabled = Boolean(raw.enabled);
+    const normalizedScopePath = this.normalizeLibraryScopePath(raw.scope_path || raw.path || raw.scopePath || null);
+
+    if (!enabled) {
+      this.setState({
+        libraryScope: {
+          enabled: false,
+          project: null,
+        }
+      });
+      this.currentMcpProjectSource = 'ui';
+      return true;
+    }
+
+    if (!normalizedScopePath) {
+      return false;
+    }
+
+    const matched = this.findLibraryScopeByPath(normalizedScopePath);
+    if (!matched) {
+      return false;
+    }
+
+    this.setState({
+      libraryScope: {
+        enabled: true,
+        project: matched,
+      }
+    });
+    this.currentMcpProjectSource = 'ui';
+    return true;
+  }
+
 
 
   /**
@@ -1063,6 +1697,8 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
             this.currentPageContext = context;
             // Reload conversations when page changes to show page-specific conversations
             this.fetchConversations();
+            // Reload scope lists + page-specific scope selection for the new page context.
+            this.loadLibraryProjects();
           }
         );
       } catch (error) {
@@ -1949,7 +2585,10 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       pendingModelSnapshot: null,
       pendingPersonaId: null
     }, async () => {
-      this.applyConfiguredProjectDefault({ forNewChat: true });
+      const restoredScope = await this.restoreSavedLibraryScopeSelection();
+      if (!restoredScope) {
+        this.applyInitialLibraryScopeDefaults({ forNewChat: true });
+      }
       this.applyConfiguredPersonaDefault({ forNewChat: true });
       this.applyConfiguredModelDefault({ forNewChat: true });
       console.log(`✅ New chat started - conversation_id: ${this.state.conversation_id}`);
@@ -3249,17 +3888,19 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     }
 
     this.currentMcpProjectSource = 'ui';
-    this.setState(prevState => ({
-      libraryScope: {
+    this.setState(prevState => {
+      const nextScope: LibraryScope = {
         ...prevState.libraryScope,
         enabled: !prevState.libraryScope.enabled,
         project: !prevState.libraryScope.enabled ? prevState.libraryScope.project : null,
-      }
-    }));
+      };
+      void this.saveLibraryScopeSelection(nextScope);
+      return { libraryScope: nextScope };
+    });
   };
 
   /**
-   * Select a Library project (null = "All")
+   * Select a Library scope item (null = "All")
    */
   handleLibrarySelectProject = (project: LibraryProject | null) => {
     if (this.isProjectScopeLocked()) {
@@ -3267,29 +3908,96 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
     }
 
     this.currentMcpProjectSource = 'ui';
+    const nextScope: LibraryScope = {
+      enabled: true,
+      project,
+    };
+
     this.setState({
-      libraryScope: {
-        enabled: true,
-        project,
-      }
+      libraryScope: nextScope,
+    }, () => {
+      void this.saveLibraryScopeSelection(nextScope);
     });
   };
 
+  private mergeUniqueLibraryProjects(projectsByLifecycle: LibraryProject[][]): LibraryProject[] {
+    const merged = projectsByLifecycle.flat();
+    const seen = new Set<string>();
+    const deduped: LibraryProject[] = [];
+
+    for (const project of merged) {
+      const root = project.scope_root || 'projects';
+      const path = String(project.path || '').trim();
+      const key = path
+        ? `${root}:${path}`
+        : `${root}:${project.lifecycle || 'active'}:${project.slug}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      deduped.push(project);
+    }
+
+    return deduped;
+  }
+
   /**
-   * Load library projects list
+   * Load library scope lists (projects + life)
    */
   loadLibraryProjects = async () => {
     if (!this.libraryService) return;
+
+    const preferredLifecycle = this.isDefaultLibraryScopeEnabled()
+      ? this.getConfiguredProjectLifecycle()
+      : 'active';
+    const projectLifecycles = Array.from(new Set(
+      ['active', preferredLifecycle]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+    ));
+
     try {
-      const lifecycle = this.isDefaultLibraryScopeEnabled()
-        ? this.getConfiguredProjectLifecycle()
-        : 'active';
-      const projects = await this.libraryService.fetchProjects(lifecycle);
-      this.libraryProjects = projects;
-      this.applyConfiguredProjectDefault();
+      const projectRequests = projectLifecycles.map(async (lifecycle) => {
+        try {
+          return await this.libraryService!.fetchProjects(lifecycle);
+        } catch (error) {
+          console.warn(`Failed to fetch library projects for lifecycle "${lifecycle}"`, error);
+          return [] as LibraryProject[];
+        }
+      });
+
+      const lifeScopesRequest = this.libraryService.fetchLifeScopes().catch((error) => {
+        console.warn('Failed to fetch library life scopes', error);
+        return [] as LibraryProject[];
+      });
+
+      const [projectLists, lifeScopes] = await Promise.all([
+        Promise.all(projectRequests),
+        lifeScopesRequest,
+      ]);
+
+      const mergedProjects = this.mergeUniqueLibraryProjects(projectLists);
+
+      this.libraryProjects = mergedProjects.map((project) => ({
+        ...project,
+        scope_root: project.scope_root || 'projects',
+      }));
+      this.libraryLifeScopes = lifeScopes.map((scope) => ({
+        ...scope,
+        scope_root: 'life',
+      }));
+
+      const restoredScope = await this.restoreSavedLibraryScopeSelection();
+      if (!restoredScope) {
+        this.applyInitialLibraryScopeDefaults();
+      }
+
       this.forceUpdate();
+      setTimeout(() => {
+        void this.emitLibraryStartupStatusIfNeeded();
+      }, 0);
     } catch (err) {
-      console.error('Failed to load library projects:', err);
+      console.error('Failed to load library scopes:', err);
     }
   };
 
@@ -3298,13 +4006,14 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
   }
 
   private matchProjectFromPrompt(prompt: string): { project: LibraryProject; confidence: number } | null {
-    if (!prompt || !this.libraryProjects.length) return null;
+    const scopeItems = this.getAllLibraryScopeItems();
+    if (!prompt || !scopeItems.length) return null;
 
     const loweredPrompt = prompt.toLowerCase();
     const normalizedPrompt = this.normalizeProjectToken(prompt);
     const candidates: Array<{ project: LibraryProject; confidence: number }> = [];
 
-    for (const project of this.libraryProjects) {
+    for (const project of scopeItems) {
       const slug = (project.slug || '').toLowerCase();
       const name = (project.name || '').toLowerCase();
       const normalizedSlug = this.normalizeProjectToken(slug);
@@ -3452,11 +4161,11 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
 
     if (event.type === 'project_scope_selected' || event.type === 'project_scope_suggested') {
       const projectSlug = event.project?.slug;
-      if (!projectSlug || !this.libraryProjects.length) return;
+      if (!projectSlug) return;
 
-      const matchedProject = this.libraryProjects.find(
-        (project) => project.slug.toLowerCase() === String(projectSlug).toLowerCase()
-      );
+      const projectScopeValue = String(projectSlug).trim();
+      const matchedProject = this.findLibraryScopeByPath(projectScopeValue)
+        || this.findLibraryScopeBySlug(projectScopeValue, null);
       if (!matchedProject) return;
 
       const confidence = Number(event.confidence || 1);
@@ -3468,21 +4177,12 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
           return;
         }
         this.currentMcpProjectSource = 'backend_suggested';
-        this.setState((prevState) => ({
+        this.setState({
           libraryScope: {
             enabled: true,
             project: matchedProject,
           },
-          messages: [
-            ...prevState.messages,
-            {
-              id: generateId('scope-status'),
-              sender: 'ai',
-              content: `Project scope set to ${matchedProject.name} (${event.type === 'project_scope_selected' ? 'backend selected' : 'backend suggested'}).`,
-              timestamp: new Date().toISOString(),
-            },
-          ],
-        }));
+        });
       } else {
         this.addMessageToChat({
           id: generateId('scope-suggested'),
@@ -3622,30 +4322,31 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
               project: matchedProject.project,
             },
           });
-          this.addMessageToChat({
-            id: generateId('scope-auto'),
-            sender: 'ai',
-            content: `Project scope set to ${matchedProject.project.name} for this request.`,
-            timestamp: new Date().toISOString(),
-          });
+
         } else {
           this.addMessageToChat({
             id: generateId('scope-needed'),
             sender: 'ai',
-            content: 'Library tools are disabled until you select a project.',
+            content: 'Library tools are disabled until you select a scope.',
             timestamp: new Date().toISOString(),
           });
         }
       }
 
+      const effectiveScopePath = this.getScopePathForProject(effectiveProject);
+      if (this.state.libraryScope.enabled && effectiveProject) {
+        const scopeLabel = this.getLibraryScopeLabel(effectiveProject);
+        enhancedPrompt = `[LIBRARY SCOPE - ${scopeLabel}]\n\n${enhancedPrompt}`;
+      }
+
       const mcpScopeParams: MCPRequestParams = {
         mcp_tools_enabled: Boolean(this.state.libraryScope.enabled && effectiveProject),
         mcp_scope_mode: (this.state.libraryScope.enabled && effectiveProject ? 'project' : 'none') as 'none' | 'project',
-        mcp_project_slug: effectiveProject?.slug,
+        mcp_project_slug: effectiveScopePath || effectiveProject?.slug,
         mcp_project_name: effectiveProject?.name,
         mcp_project_lifecycle: effectiveProject?.lifecycle || 'active',
         mcp_project_source: mcpProjectSource,
-        mcp_plugin_slug: 'BrainDriveLibraryService',
+        mcp_plugin_slug: 'BrainDriveLibraryPlugin',
       };
       if (approvalDecision) {
         mcpScopeParams.mcp_approval = approvalDecision;
@@ -3700,7 +4401,12 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
       }
       
       // Library context injection if enabled
-      if (this.state.libraryScope.enabled && effectiveProject && this.libraryService) {
+      if (
+        this.state.libraryScope.enabled
+        && effectiveProject
+        && effectiveProject.scope_root !== 'life'
+        && this.libraryService
+      ) {
         try {
           let libraryContext = '';
           const ctx = await this.libraryService.fetchProjectContext(
@@ -3711,7 +4417,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
             const fileEntries = Object.entries(ctx.files)
               .map(([name, f]) => `--- ${name} ---\n${f.content}`)
               .join('\n\n');
-            libraryContext = `[LIBRARY CONTEXT - Project: ${effectiveProject.name}]\n${fileEntries}\n[END LIBRARY CONTEXT]`;
+            libraryContext = `[LIBRARY CONTEXT - Scope: ${this.getLibraryScopeLabel(effectiveProject)}]\n${fileEntries}\n[END LIBRARY CONTEXT]`;
           }
           if (libraryContext) {
             enhancedPrompt = `${libraryContext}\n\n${enhancedPrompt}`;
@@ -3720,6 +4426,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
           console.error('Library context error:', libError);
         }
       }
+
 
       // Perform web search if enabled
       
@@ -4120,6 +4827,7 @@ class BrainDriveChat extends React.Component<BrainDriveChatProps, BrainDriveChat
                 lockPersonaSelection={this.isPersonaSelectionLocked()}
                 libraryScope={this.state.libraryScope}
                 libraryProjects={this.libraryProjects}
+                libraryLifeScopes={this.libraryLifeScopes}
                 onLibraryToggle={this.handleLibraryToggle}
                 onLibrarySelectProject={this.handleLibrarySelectProject}
                 onOpenCreateLibraryPage={this.openCreateLibraryPageModal}
