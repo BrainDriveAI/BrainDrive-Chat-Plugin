@@ -1,3 +1,7 @@
+> ⚠️ **This repository has been archived.** BrainDrive has evolved into the [Personal AI Architecture](https://personalaiarchitecture.org) — an MIT-licensed, open architecture for building personal AI systems with zero lock-in. See the [new repo](https://github.com/Personal-AI-Architecture/the-architecture) for the latest work.
+
+---
+
 # BrainDriveChat Plugin
 
 [![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/BrainDriveAI/BrainDrive-Chat-Plugin)
